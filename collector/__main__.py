@@ -1,6 +1,6 @@
 """CLI entry point.
 
-    python -m collector ua --series "<name>" --step fetch|parse|all
+    python -m collector ua --series "<name>" --step fetch|parse|all|match
     python -m collector ua --step series
 """
 
@@ -24,9 +24,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ua.add_argument(
         "--step",
-        choices=["fetch", "parse", "all", "series"],
+        choices=["fetch", "parse", "all", "series", "match"],
         default="all",
-        help="which step to run",
+        help="which step to run ('all' = fetch, parse, match)",
+    )
+    ua.add_argument(
+        "--refresh-ua-coins",
+        action="store_true",
+        help="refetch cached ua-coins.info yearly catalog pages instead of reusing staging/ua/_ua_coins/raw",
     )
 
     return parser
@@ -52,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.fetch()
     if args.step in ("parse", "all"):
         parser.parse()
+    if args.step in ("match", "all"):
+        parser.match_ua_coins(refresh=args.refresh_ua_coins)
 
     return 0
 

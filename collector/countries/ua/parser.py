@@ -22,7 +22,9 @@ from pathlib import Path
 import httpx
 from selectolax.parser import HTMLParser
 
+from collector.core.pacing import Pacer
 from collector.core.staging import DEFAULT_STAGING_ROOT, SeriesStaging
+from collector.countries.ua import ua_coins
 from collector.countries.ua.nbu_client import (
     BASE_URL,
     LOCALE_URL_SEGMENT,
@@ -126,6 +128,33 @@ class ParseSummary:
                 f"[parse]   ANOMALY: {a['source_id']} {a['field']}="
                 f"{a['raw_value']!r} — {a['message']}"
             )
+
+
+@dataclass
+class MatchSummary:
+    series: str
+    total: int
+    matched_exact: int
+    matched_year_shift: int
+    unmatched: int
+    conflicts: int
+    rows: list[dict] = field(default_factory=list)
+
+    def print_report(self) -> None:
+        print(f"[match] series: {self.series}")
+        if self.rows:
+            print(f"[match]   {'source_id':<10} {'title':<30} {'denom':<8} {'matched_by':<12} url")
+            for r in self.rows:
+                print(
+                    f"[match]   {r['source_id']:<10} {r['title']:<30} {r['denom']:<8} "
+                    f"{r['matched_by']:<12} {r['url']}"
+                )
+        matched = self.matched_exact + self.matched_year_shift
+        print(
+            f"[match]   matched {matched}/{self.total} (exact: {self.matched_exact}, "
+            f"year_shift: {self.matched_year_shift}), unmatched: {self.unmatched}, "
+            f"conflicts: {self.conflicts}"
+        )
 
 
 class ParserUkraine:
@@ -319,6 +348,25 @@ class ParserUkraine:
                     }
                 )
 
+        # A previous match_ua_coins() run may have already matched some of
+        # these cards to their ua-coins.info page -- regenerating
+        # cards.json from raw/ must not silently discard that. Only
+        # match_ua_coins() itself is allowed to overwrite a "ua_coins"
+        # block; a plain reparse carries whatever was there forward
+        # (matched dict, or an already-tried-and-failed null) by source_id.
+        existing_ua_coins: dict[str, dict | None] = {}
+        if self.staging.cards_json_path.exists():
+            try:
+                old_data = self.staging.read_parsed()
+            except (OSError, json.JSONDecodeError):
+                old_data = None
+            if old_data:
+                for old_card in old_data.get("cards", []):
+                    if "ua_coins" in old_card:
+                        existing_ua_coins[old_card["source_id"]] = old_card["ua_coins"]
+        for card in cards:
+            card["ua_coins"] = existing_ua_coins.get(card["source_id"])
+
         meta_path = self.staging.raw_dir / META_FILENAME
         series_dict = load_series_json()
         if meta_path.exists():
@@ -364,3 +412,99 @@ class ParserUkraine:
 
     def collect_series(self):
         return collect_series(staging_root=self.staging_root)
+
+    # ------------------------------------------------------------------ #
+    # ua-coins.info matching
+    # ------------------------------------------------------------------ #
+
+    def match_ua_coins(self, refresh: bool = False) -> MatchSummary:
+        if self.series is None or self.staging is None:
+            raise RuntimeError(
+                "match_ua_coins() requires a series name (pass series=... to ParserUkraine)"
+            )
+        if not self.staging.cards_json_path.exists():
+            raise RuntimeError(
+                f"no parsed cards for {self.series!r} — run --step parse first"
+            )
+
+        data = self.staging.read_parsed()
+        cards = data.get("cards", [])
+
+        years_needed: set[int] = set()
+        for card in cards:
+            year = card.get("year")
+            if year is not None:
+                years_needed.update((year - 1, year, year + 1))
+
+        dir_ = ua_coins.staging_dir(self.staging_root)
+        pacer = Pacer(ua_coins.REQUEST_DELAY_RANGE)
+        rows_by_year: dict[int, list] = {}
+        years_sorted = sorted(years_needed)
+        with httpx.Client(
+            base_url=ua_coins.BASE_URL, headers={"User-Agent": USER_AGENT}, timeout=30.0
+        ) as client:
+            for i, year in enumerate(years_sorted, 1):
+                html, fetched = ua_coins.fetch_year(client, year, dir_, pacer, refresh)
+                rows = ua_coins.parse_year(html, year)
+                rows_by_year[year] = rows
+                source = "fetched" if fetched else "cached"
+                found = f"{len(rows)} coin(s) found" if rows else "no coins found"
+                print(f"[match]   year {year} ({source}, {i}/{len(years_sorted)}): {found}")
+
+        matched_at = datetime.now(timezone.utc).isoformat()
+        cards, unmatched_entries = ua_coins.match_cards(cards, rows_by_year, matched_at)
+
+        data["cards"] = cards
+        self.staging.write_parsed(data)
+        self.staging.write_unmatched(unmatched_entries)
+
+        unmatched_by_id = {e["source_id"]: e for e in unmatched_entries}
+        rows = []
+        matched_exact = matched_year_shift = 0
+        for card in cards:
+            source_id = card["source_id"]
+            title = (card.get("titles", {}).get("uk") or "?")[:30]
+            denom = card.get("denomination", {}).get("value")
+            denom_str = str(denom) if denom is not None else "?"
+            ua = card.get("ua_coins")
+            if ua:
+                if ua["matched_by"] == "exact":
+                    matched_exact += 1
+                elif ua["matched_by"] == "year_shift":
+                    matched_year_shift += 1
+                rows.append(
+                    {
+                        "source_id": source_id,
+                        "title": title,
+                        "denom": denom_str,
+                        "matched_by": ua["matched_by"],
+                        "url": ua["url"],
+                    }
+                )
+            else:
+                entry = unmatched_by_id.get(source_id)
+                label = "CONFLICT" if entry and entry["reason"].startswith("conflict") else "UNMATCHED"
+                rows.append(
+                    {
+                        "source_id": source_id,
+                        "title": title,
+                        "denom": denom_str,
+                        "matched_by": label,
+                        "url": "",
+                    }
+                )
+
+        conflicts = sum(1 for e in unmatched_entries if e["reason"].startswith("conflict"))
+        unmatched = len(unmatched_entries) - conflicts
+
+        summary = MatchSummary(
+            series=self.series,
+            total=len(cards),
+            matched_exact=matched_exact,
+            matched_year_shift=matched_year_shift,
+            unmatched=unmatched,
+            conflicts=conflicts,
+            rows=rows,
+        )
+        summary.print_report()
+        return summary

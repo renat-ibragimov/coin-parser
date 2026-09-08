@@ -14,8 +14,6 @@ in each locale, on the live site -- never by comparing name text.
 from __future__ import annotations
 
 import json
-import random
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +21,7 @@ from pathlib import Path
 import httpx
 from selectolax.parser import HTMLParser
 
+from collector.core.pacing import Pacer
 from collector.core.staging import DEFAULT_STAGING_ROOT, slugify
 from collector.countries.ua.nbu_client import (
     BASE_URL,
@@ -42,18 +41,6 @@ SERIES_JSON_PATH = Path(__file__).parent / "series.json"
 # an empty value="" in both locales' <select>; the literal phrases are
 # kept too as a defensive fallback in case NBU ever renders it as text.
 _PLACEHOLDER_VALUES = {"", "не вказується", "not specified", "any"}
-
-
-class _Pacer:
-    """Sleeps REQUEST_DELAY_RANGE between calls, except the very first."""
-
-    def __init__(self) -> None:
-        self._first = True
-
-    def wait(self) -> None:
-        if not self._first:
-            time.sleep(random.uniform(*REQUEST_DELAY_RANGE))
-        self._first = False
 
 
 @dataclass
@@ -103,7 +90,7 @@ class SeriesCollectSummary:
 
 
 def _fetch_series_options(
-    client: httpx.Client, locale: str, staging_dir: Path, pacer: _Pacer
+    client: httpx.Client, locale: str, staging_dir: Path, pacer: Pacer
 ) -> list[str]:
     pacer.wait()
     path = LISTING_PATH.format(locale_path=LOCALE_URL_SEGMENT[locale])
@@ -144,7 +131,7 @@ def _fetch_series_cards(
     name: str,
     staging_dir: Path,
     warnings: list[str],
-    pacer: _Pacer,
+    pacer: Pacer,
 ) -> tuple[set[str], list[int]]:
     """All card ids under `name` in `locale`, plus (uk only) the years
     parsed from each card's circulation date."""
@@ -365,7 +352,7 @@ def collect_series(staging_root: Path = DEFAULT_STAGING_ROOT) -> SeriesCollectSu
         summary.print_report()
         return summary
 
-    pacer = _Pacer()
+    pacer = Pacer(REQUEST_DELAY_RANGE)
     with httpx.Client(
         base_url=BASE_URL, headers={"User-Agent": USER_AGENT}, timeout=30.0
     ) as client:

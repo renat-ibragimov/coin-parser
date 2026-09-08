@@ -90,3 +90,16 @@ class SeriesStaging:
             encoding="utf-8",
         )
         return path
+
+    @property
+    def unmatched_json_path(self) -> Path:
+        return self.parsed_dir / "unmatched.json"
+
+    def write_unmatched(self, unmatched: list[dict]) -> Path:
+        self.ensure_dirs()
+        path = self.unmatched_json_path
+        path.write_text(
+            json.dumps(unmatched, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return path
