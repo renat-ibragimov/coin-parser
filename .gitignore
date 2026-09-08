@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# coin-collector local cache
+/staging/
+
 # Environments
 .env
 .envrc

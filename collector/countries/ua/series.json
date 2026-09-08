@@ -1,0 +1,488 @@
+{
+  "country": "ua",
+  "original_lang": "uk",
+  "generated_at": "2026-09-08T14:29:23.640183+00:00",
+  "series": [
+    {
+      "is_official": true,
+      "names": {
+        "uk": "2000-ліття Різдва Христового",
+        "en": "2000 Years of Christmas"
+      },
+      "nbu_card_count": 6,
+      "year_range": [
+        1999,
+        2000
+      ],
+      "slug": "2000-littia-rizdva-khrystovoho"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Античні пам`ятки України",
+        "en": "Ancient Monuments of Ukraine"
+      },
+      "nbu_card_count": 2,
+      "year_range": [
+        2009,
+        2010
+      ],
+      "slug": "antychni-pam-iatky-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Безсмертна моя Україно",
+        "en": "My Immortal Ukraine "
+      },
+      "nbu_card_count": 16,
+      "year_range": [
+        2022,
+        2026
+      ],
+      "slug": "bezsmertna-moia-ukraino"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Друга світова війна",
+        "en": "Victory in the Great Patriotic War 1941-1945"
+      },
+      "nbu_card_count": 22,
+      "year_range": [
+        1995,
+        2020
+      ],
+      "slug": "druha-svitova-viina"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Духовні скарби України",
+        "en": "Spiritual Treasures of Ukraine"
+      },
+      "nbu_card_count": 55,
+      "year_range": [
+        1996,
+        2026
+      ],
+      "slug": "dukhovni-skarby-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Дитячий Зодіак",
+        "en": "CHILDREN’S ZODIAC"
+      },
+      "nbu_card_count": 12,
+      "year_range": [
+        2014,
+        2015
+      ],
+      "slug": "dytiachyi-zodiak"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Фауна в пам`ятках культури України",
+        "en": "Fauna in Ukrainian Cultural Monuments"
+      },
+      "nbu_card_count": 10,
+      "year_range": [
+        2016,
+        2019
+      ],
+      "slug": "fauna-v-pam-iatkakh-kultury-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Флора і фауна України",
+        "en": "Ukrainian Flora and Fauna"
+      },
+      "nbu_card_count": 63,
+      "year_range": [
+        1998,
+        2026
+      ],
+      "slug": "flora-i-fauna-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Герої козацької доби",
+        "en": "Heroes of Cossack Age"
+      },
+      "nbu_card_count": 21,
+      "year_range": [
+        1997,
+        2021
+      ],
+      "slug": "heroi-kozatskoi-doby"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Героям Майдану",
+        "en": "To the Heroes of the Maidan"
+      },
+      "nbu_card_count": 3,
+      "year_range": [
+        2015,
+        2015
+      ],
+      "slug": "heroiam-maidanu"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Гетьманські столиці",
+        "en": "Hetmans’ capital cities"
+      },
+      "nbu_card_count": 3,
+      "year_range": [
+        2005,
+        2008
+      ],
+      "slug": "hetmanski-stolytsi"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Інші монети",
+        "en": "Other coins"
+      },
+      "nbu_card_count": 99,
+      "year_range": [
+        2012,
+        2026
+      ],
+      "slug": "inshi-monety"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Княжа Україна",
+        "en": "Princes of Ukraine"
+      },
+      "nbu_card_count": 11,
+      "year_range": [
+        1998,
+        2020
+      ],
+      "slug": "kniazha-ukraina"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Літаки України",
+        "en": "Airplanes of Ukraine"
+      },
+      "nbu_card_count": 10,
+      "year_range": [
+        2002,
+        2018
+      ],
+      "slug": "litaky-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Міста-герої України",
+        "en": "Hero-Cities of Ukraine"
+      },
+      "nbu_card_count": 4,
+      "year_range": [
+        1995,
+        1995
+      ],
+      "slug": "mista-heroi-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Морська історія України",
+        "en": "Maritime History of Ukraine"
+      },
+      "nbu_card_count": 8,
+      "year_range": [
+        2004,
+        2013
+      ],
+      "slug": "morska-istoriia-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "На межі тисячоліть",
+        "en": "On the Edge of Millenniums"
+      },
+      "nbu_card_count": 2,
+      "year_range": [
+        2000,
+        2001
+      ],
+      "slug": "na-mezhi-tysiacholit"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Найменша золота монета",
+        "en": "The smallest golden coin"
+      },
+      "nbu_card_count": 12,
+      "year_range": [
+        2003,
+        2012
+      ],
+      "slug": "naimensha-zolota-moneta"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Народні музичні інструменти",
+        "en": "Folk Musical Instruments"
+      },
+      "nbu_card_count": 4,
+      "year_range": [
+        2003,
+        2007
+      ],
+      "slug": "narodni-muzychni-instrumenty"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Народні промисли та ремесла",
+        "en": "Folk Crafts of Ukraine"
+      },
+      "nbu_card_count": 14,
+      "year_range": [
+        2009,
+        2012
+      ],
+      "slug": "narodni-promysly-ta-remesla"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Області України",
+        "en": "Oblasts of Ukraine"
+      },
+      "nbu_card_count": 30,
+      "year_range": [
+        2007,
+        2018
+      ],
+      "slug": "oblasti-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Обрядові свята України",
+        "en": "Ritual Festivals of Ukraine"
+      },
+      "nbu_card_count": 14,
+      "year_range": [
+        2002,
+        2010
+      ],
+      "slug": "obriadovi-sviata-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Пам’ятки архітектури України",
+        "en": "Architectural monuments of Ukraine"
+      },
+      "nbu_card_count": 53,
+      "year_range": [
+        2001,
+        2023
+      ],
+      "slug": "pamiatky-arkhitektury-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Пам’ятки давніх культур України",
+        "en": "Points of interest of ancient cultures of Ukraine"
+      },
+      "nbu_card_count": 5,
+      "year_range": [
+        2000,
+        2001
+      ],
+      "slug": "pamiatky-davnikh-kultur-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Східний календар",
+        "en": "Eastener calendar"
+      },
+      "nbu_card_count": 21,
+      "year_range": [
+        2006,
+        2025
+      ],
+      "slug": "skhidnyi-kalendar"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Славетні роди України",
+        "en": "Famous Families of Ukraine"
+      },
+      "nbu_card_count": 6,
+      "year_range": [
+        2004,
+        2011
+      ],
+      "slug": "slavetni-rody-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Спорт",
+        "en": "Sports"
+      },
+      "nbu_card_count": 59,
+      "year_range": [
+        1996,
+        2022
+      ],
+      "slug": "sport"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Стародавні міста України",
+        "en": "Ancient cities of Ukraine"
+      },
+      "nbu_card_count": 46,
+      "year_range": [
+        1999,
+        2020
+      ],
+      "slug": "starodavni-mista-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Україна космічна",
+        "en": "COSMIC UKRAINE"
+      },
+      "nbu_card_count": 2,
+      "year_range": [
+        2017,
+        2019
+      ],
+      "slug": "ukraina-kosmichna"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Українська держава",
+        "en": "THE UKRAINIAN STATE"
+      },
+      "nbu_card_count": 5,
+      "year_range": [
+        2022,
+        2026
+      ],
+      "slug": "ukrainska-derzhava"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Українська спадщина",
+        "en": "Ukrainian Heritage"
+      },
+      "nbu_card_count": 48,
+      "year_range": [
+        2005,
+        2026
+      ],
+      "slug": "ukrainska-spadshchyna"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Відродження християнської духовності в Україні",
+        "en": null
+      },
+      "nbu_card_count": 2,
+      "year_range": [
+        2008,
+        2010
+      ],
+      "slug": "vidrodzhennia-khrystyianskoi-dukhovnosti-v-ukraini"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Відродження української державності",
+        "en": "Rebirth of Ukrainian Statehood"
+      },
+      "nbu_card_count": 50,
+      "year_range": [
+        1996,
+        2021
+      ],
+      "slug": "vidrodzhennia-ukrainskoi-derzhavnosti"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Видатні особистості України",
+        "en": "Outstanding Personalities of Ukraine"
+      },
+      "nbu_card_count": 179,
+      "year_range": [
+        1995,
+        2026
+      ],
+      "slug": "vydatni-osobystosti-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Вищі навчальні заклади України",
+        "en": "Higher educational establishments"
+      },
+      "nbu_card_count": 49,
+      "year_range": [
+        1998,
+        2022
+      ],
+      "slug": "vyshchi-navchalni-zaklady-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Збройні Сили України",
+        "en": "UKRAINE’S ARMED FORCES "
+      },
+      "nbu_card_count": 26,
+      "year_range": [
+        2015,
+        2026
+      ],
+      "slug": "zbroini-syly-ukrainy"
+    },
+    {
+      "is_official": true,
+      "names": {
+        "uk": "Знаки зодіаку",
+        "en": "Signs of the Zodiac"
+      },
+      "nbu_card_count": 25,
+      "year_range": [
+        2006,
+        2025
+      ],
+      "slug": "znaky-zodiaku"
+    }
+  ]
+}
