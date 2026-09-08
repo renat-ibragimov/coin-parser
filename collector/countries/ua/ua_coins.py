@@ -51,24 +51,18 @@ def staging_dir(staging_root: Path) -> Path:
 # ---------------------------------------------------------------------- #
 
 
-def fetch_year(
-    client: httpx.Client, year: int, dir_: Path, pacer: Pacer, refresh: bool
-) -> tuple[str, bool]:
-    """HTML for one year's catalog page. Returns (html, was_fetched) --
-    was_fetched is False when it was read from the staging cache without
-    touching the network.
-
-    On a 429, backs off and retries (respecting a Retry-After header if
-    the server sends one) instead of letting the whole match run crash --
-    a rate limit is a "slow down", not a fatal error.
+def get_with_retry(
+    client: httpx.Client, path: str, pacer: Pacer, *, log_label: str = ""
+) -> httpx.Response:
+    """GET `path` off ua-coins.info, paced, with 429 backoff-retry
+    (respecting a Retry-After header if the server sends one). Shared by
+    every ua-coins.info caller in this adapter (catalog pages, coin
+    detail pages, image downloads) -- one rate-limit policy for the one
+    host, so nothing accidentally paces or retries differently.
     """
-    path = dir_ / f"{year}.html"
-    if path.exists() and not refresh:
-        return path.read_text(encoding="utf-8"), False
-
     for attempt in range(1, MAX_429_RETRIES + 1):
         pacer.wait()
-        resp = client.get(CATALOG_PATH.format(year=year))
+        resp = client.get(path)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After")
             delay = (
@@ -77,19 +71,47 @@ def fetch_year(
                 else DEFAULT_429_BACKOFF_SECONDS
             )
             print(
-                f"[ua_coins]   429 from ua-coins.info for {year} "
+                f"[ua_coins]   429 from ua-coins.info for {log_label or path} "
                 f"(attempt {attempt}/{MAX_429_RETRIES}), waiting {delay:.0f}s..."
             )
             time.sleep(delay)
             continue
         resp.raise_for_status()
-        html = resp.text
-        dir_.mkdir(parents=True, exist_ok=True)
-        path.write_text(html, encoding="utf-8")
-        return html, True
+        return resp
 
     resp.raise_for_status()  # exhausted retries -- surface the last 429 as an error
     raise AssertionError("unreachable")  # raise_for_status() above always raises here
+
+
+def fetch_year(
+    client: httpx.Client, year: int, dir_: Path, pacer: Pacer, refresh: bool
+) -> tuple[str, bool]:
+    """HTML for one year's catalog page. Returns (html, was_fetched) --
+    was_fetched is False when it was read from the staging cache without
+    touching the network.
+
+    A year with no catalog page at all (ua-coins 404s it -- seen for
+    year+1 of a card whose circulation year is the current year, e.g.
+    querying 2027 while it's still 2026) is cached as an empty page
+    rather than raised as an error: it's a legitimate "no coins here",
+    not a fetch failure, and re-fetching it every run would be wasted
+    requests for a year that isn't going to appear later.
+    """
+    path = dir_ / f"{year}.html"
+    if path.exists() and not refresh:
+        return path.read_text(encoding="utf-8"), False
+
+    try:
+        resp = get_with_retry(client, CATALOG_PATH.format(year=year), pacer, log_label=str(year))
+        html = resp.text
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            html = ""
+        else:
+            raise
+    dir_.mkdir(parents=True, exist_ok=True)
+    path.write_text(html, encoding="utf-8")
+    return html, True
 
 
 # ---------------------------------------------------------------------- #

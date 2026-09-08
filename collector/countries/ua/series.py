@@ -151,7 +151,21 @@ def _fetch_series_cards(
             html, encoding="utf-8"
         )
 
+        # Pagination MUST be decided from the raw block count, not from
+        # `cards` (parse_cards() silently drops a block it can't extract
+        # an id from -- e.g. a brand-new NBU listing with no photo
+        # uploaded yet, see docs/01_findings.md). Using len(cards) here
+        # made a page with even one such unparseable block look short
+        # and stopped pagination early, truncating the whole series scan
+        # (found live: "Інші монети" undercounted 99 vs the real 149
+        # because page 1 had exactly one photo-less card).
+        raw_block_count = len(HTMLParser(html).css("div.search-result"))
         cards = parse_cards(html, locale)
+        if len(cards) != raw_block_count:
+            warnings.append(
+                f"{name} ({locale}) page {page}: {raw_block_count - len(cards)} card(s) "
+                "on this page failed to parse (likely missing photo) and were skipped"
+            )
         for card in cards:
             ids.add(card["source_id"])
             if locale == "uk":
@@ -160,7 +174,7 @@ def _fetch_series_cards(
                 if year is not None:
                     years.append(year)
 
-        if len(cards) < PER_PAGE:
+        if raw_block_count < PER_PAGE:
             break
         page += 1
 

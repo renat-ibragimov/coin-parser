@@ -35,6 +35,7 @@ from collector.countries.ua.nbu_client import (
 )
 from collector.countries.ua.load_series import load_series
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
+from collector.countries.ua.photos import fetch_photos, process_photos
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
 
 META_FILENAME = "_meta.json"
@@ -517,3 +518,27 @@ class ParserUkraine:
         )
         summary.print_report()
         return summary
+
+    # ------------------------------------------------------------------ #
+    # photos
+    # ------------------------------------------------------------------ #
+
+    def fetch_photos(self, refresh: bool = False):
+        if self.series is None or self.staging is None:
+            raise RuntimeError(
+                "fetch_photos() requires a series name (pass series=... to ParserUkraine)"
+            )
+        if not self.staging.cards_json_path.exists():
+            raise RuntimeError(f"no parsed cards for {self.series!r} — run --step parse first")
+        cards = self.staging.read_parsed().get("cards", [])
+        return fetch_photos(cards, self.staging.dir, series=self.series, refresh=refresh)
+
+    def process_photos(self):
+        if self.series is None or self.staging is None:
+            raise RuntimeError(
+                "process_photos() requires a series name (pass series=... to ParserUkraine)"
+            )
+        if not self.staging.cards_json_path.exists():
+            raise RuntimeError(f"no parsed cards for {self.series!r} — run --step parse first")
+        cards = self.staging.read_parsed().get("cards", [])
+        return process_photos(cards, self.staging.dir, series=self.series)

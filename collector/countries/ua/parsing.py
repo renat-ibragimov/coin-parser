@@ -105,6 +105,17 @@ def _parse_card_node(node, locale: str) -> dict | None:
     obverse_url = urljoin(BASE_URL, imgs[0].attributes.get("src") or "") if imgs else None
     reverse_url = urljoin(BASE_URL, imgs[1].attributes.get("src") or "") if len(imgs) > 1 else None
 
+    # The thumbnail in the listing is 200x200, but NBU often wraps it in a
+    # lightbox link to the full-resolution original (nbu:482's is 1120x1120,
+    # the largest that exists for that coin anywhere). Read per thumbnail
+    # rather than by collecting all the links, so an obverse that has one
+    # and a reverse that does not stay correctly paired -- both cases occur,
+    # sometimes on the same page. The link is not always live either
+    # (nbu:438's 404s), so downstream must treat it as one more candidate
+    # that may fail, not as a promise.
+    obverse_big_url = _big_image_url(imgs[0]) if imgs else None
+    reverse_big_url = _big_image_url(imgs[1]) if len(imgs) > 1 else None
+
     return {
         "source_id": source_id,
         "title_raw": title_raw,
@@ -114,7 +125,22 @@ def _parse_card_node(node, locale: str) -> dict | None:
         "reverse_desc": reverse_desc,
         "obverse_img": obverse_url,
         "reverse_img": reverse_url,
+        "obverse_big_img": obverse_big_url,
+        "reverse_big_img": reverse_big_url,
     }
+
+
+def _big_image_url(img_node) -> str | None:
+    """The full-resolution original behind a listing thumbnail, if the page
+    links one: `<a class="big-image" href="..."><img src="...thumb..."></a>`.
+    """
+    node = img_node.parent
+    while node is not None and node.tag != "div":
+        if node.tag == "a" and "big-image" in (node.attributes.get("class") or ""):
+            href = node.attributes.get("href")
+            return urljoin(BASE_URL, href) if href else None
+        node = node.parent
+    return None
 
 
 def _split_description(
@@ -328,5 +354,7 @@ def build_canonical_card(
         "images": {
             "obverse_url": uk["obverse_img"],
             "reverse_url": uk["reverse_img"],
+            "obverse_big_url": uk.get("obverse_big_img"),
+            "reverse_big_url": uk.get("reverse_big_img"),
         },
     }

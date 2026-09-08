@@ -1,6 +1,6 @@
 """CLI entry point.
 
-    python -m collector ua --series "<name>" --step fetch|parse|all|match
+    python -m collector ua --series "<name>" --step fetch|parse|all|match|fetch-photos|process-photos
     python -m collector ua --step series
     python -m collector ua --step load-series   # writes to coin_keeper's DB, needs DATABASE_URL
 """
@@ -25,14 +25,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ua.add_argument(
         "--step",
-        choices=["fetch", "parse", "all", "series", "match", "load-series"],
+        choices=[
+            "fetch",
+            "parse",
+            "all",
+            "series",
+            "match",
+            "load-series",
+            "fetch-photos",
+            "process-photos",
+        ],
         default="all",
-        help="which step to run ('all' = fetch, parse, match)",
+        help="which step to run ('all' = fetch, parse, match, fetch-photos, process-photos)",
     )
     ua.add_argument(
         "--refresh-ua-coins",
         action="store_true",
         help="refetch cached ua-coins.info yearly catalog pages instead of reusing staging/ua/_ua_coins/raw",
+    )
+    ua.add_argument(
+        "--refresh-photos",
+        action="store_true",
+        help="redownload candidate photos instead of reusing staging/ua/<slug>/media/src",
     )
 
     return parser
@@ -65,6 +79,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.parse()
     if args.step in ("match", "all"):
         parser.match_ua_coins(refresh=args.refresh_ua_coins)
+    if args.step in ("fetch-photos", "all"):
+        parser.fetch_photos(refresh=args.refresh_photos)
+    if args.step in ("process-photos", "all"):
+        parser.process_photos()
 
     return 0
 
