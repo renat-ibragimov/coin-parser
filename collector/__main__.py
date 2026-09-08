@@ -2,6 +2,7 @@
 
     python -m collector ua --series "<name>" --step fetch|parse|all|match
     python -m collector ua --step series
+    python -m collector ua --step load-series   # writes to coin_keeper's DB, needs DATABASE_URL
 """
 
 from __future__ import annotations
@@ -20,11 +21,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ua.add_argument(
         "--series",
         default=None,
-        help="Ukrainian series name, exact match (not needed for --step series)",
+        help="Ukrainian series name, exact match (not needed for --step series/load-series)",
     )
     ua.add_argument(
         "--step",
-        choices=["fetch", "parse", "all", "series", "match"],
+        choices=["fetch", "parse", "all", "series", "match", "load-series"],
         default="all",
         help="which step to run ('all' = fetch, parse, match)",
     )
@@ -48,8 +49,13 @@ def main(argv: list[str] | None = None) -> int:
         summary = parser.collect_series()
         return 1 if summary.conflicts else 0
 
+    if args.step == "load-series":
+        parser = ParserUkraine()
+        summary = parser.load_series()
+        return 1 if summary.error else 0
+
     if not args.series:
-        print("error: --series is required unless --step series", file=sys.stderr)
+        print("error: --series is required unless --step series/load-series", file=sys.stderr)
         return 2
 
     parser = ParserUkraine(series=args.series)

@@ -33,6 +33,7 @@ from collector.countries.ua.nbu_client import (
     SEARCH_PATH,
     USER_AGENT,
 )
+from collector.countries.ua.load_series import load_series
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
 
@@ -412,6 +413,14 @@ class ParserUkraine:
 
     def collect_series(self):
         return collect_series(staging_root=self.staging_root)
+
+    # ------------------------------------------------------------------ #
+    # coin_keeper database -- writes production data, unlike every other
+    # step in this class
+    # ------------------------------------------------------------------ #
+
+    def load_series(self, dsn: str | None = None):
+        return load_series(dsn=dsn)
 
     # ------------------------------------------------------------------ #
     # ua-coins.info matching
