@@ -10,6 +10,12 @@
                                                 # see collector/countries/ua/load_cards.py
     python -m collector ua --step load-prices   # writes to coin_keeper's DB, needs DATABASE_URL
                                                 # --series narrows it to one series
+
+The four steps that write to production (load-series, load-cards,
+load-prices, plus the bucket mirror that has to happen between the last
+two) are not interchangeable and have preconditions. The full procedure
+-- server access, the ssh tunnel postgres needs, what to check after
+each step -- is docs/03_series_playbook.md.
 """
 
 from __future__ import annotations
@@ -67,6 +73,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="redownload candidate photos instead of reusing staging/ua/<slug>/media/src",
     )
     ua.add_argument(
+        "--drop-ucoin-prices",
+        action="store_true",
+        help=(
+            "load-prices only: also DELETE the legacy uCoin price history of the coins "
+            "this run just loaded a ua-coins history for (never the others -- a coin "
+            "ua-coins does not quote keeps its uCoin rows, they are its only prices)"
+        ),
+    )
+    ua.add_argument(
         "--refresh-prices",
         action="store_true",
         help=(
@@ -99,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         # --series: the price cache is shared across series, so "load
         # everything staged" is just as meaningful as "load this series".
         parser = ParserUkraine(series=args.series) if args.series else ParserUkraine()
-        summary = parser.load_prices()
+        summary = parser.load_prices(drop_ucoin=args.drop_ucoin_prices)
         return 1 if summary.error else 0
 
     if not args.series:

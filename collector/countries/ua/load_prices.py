@@ -8,6 +8,13 @@ database is reported as skipped:not_in_db and is not an error -- price
 history is an attribute of a catalogued coin, and inventing the coin
 from a price file would be the wrong step doing it.
 
+The legacy uCoin history of a coin is dropped here too, but only with
+--drop-ucoin-prices and only for the coins this very run just loaded a
+ua-coins history for. Scoped that way it cannot leave a coin priceless,
+and it is per series by design: a catalogue-wide sweep would strike
+coins ua-coins does not quote at all (the US ones, mostly), whose only
+prices are those very rows.
+
 Volume is why nothing here inserts row by row: a country's full history
 runs to hundreds of thousands of points, and a per-row INSERT over an
 ssh tunnel is not a viable shape for that. Everything goes through one
@@ -19,7 +26,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone
-from decimal import Decimal
 from pathlib import Path
 
 import psycopg
@@ -36,6 +42,12 @@ from collector.countries.ua.prices import (
 
 TABLE = "market_price_snapshots"
 SOURCE = "UA-Coins"
+# The legacy importer's label. Its numbers are unusable on precious metal
+# (seen: 8.13 UAH against ua-coins' 100600 for the same gold coin) and
+# they are dated later than some ua-coins histories, so they win the
+# storefront's "latest snapshot" pick and show as the coin's price. They
+# are dropped per series, never catalogue-wide -- see _drop_ucoin.
+UCOIN_SOURCE = "uCoin"
 CURRENCY = "UAH"
 GRADE = None  # ua-coins quotes one price per coin, ungraded
 
@@ -191,12 +203,15 @@ class PriceCoinReport:
     date_max: str | None = None
     inserted: int = 0
     duplicates: int = 0
+    ucoin_present: int = 0
+    ucoin_dropped: int = 0
     note: str | None = None
 
 
 @dataclass
 class LoadPricesSummary:
     series: str | None = None
+    drop_ucoin: bool = False
     coins: list[PriceCoinReport] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     rows_before: int | None = None
@@ -219,13 +234,19 @@ class LoadPricesSummary:
         if self.coins:
             print(
                 f"[load-prices]   {'source_id':<10} {'ua_coins':<9} {'status':<24} "
-                f"{'points':>7} {'date range':<25} {'ins':>7} {'dup':>7}"
+                f"{'points':>7} {'date range':<25} {'ins':>7} {'dup':>7} {'uCoin':>7}"
             )
         for c in self.coins:
             span = f"{c.date_min} .. {c.date_max}" if c.date_min else ""
+            if c.ucoin_dropped:
+                ucoin = f"-{c.ucoin_dropped}"
+            elif c.ucoin_present:
+                ucoin = f"{c.ucoin_present} left"
+            else:
+                ucoin = ""
             print(
                 f"[load-prices]   {c.source_id:<10} {c.ua_coins_id:<9} {c.status:<24} "
-                f"{c.points:>7} {span:<25} {c.inserted:>7} {c.duplicates:>7}"
+                f"{c.points:>7} {span:<25} {c.inserted:>7} {c.duplicates:>7} {ucoin:>7}"
             )
             if c.note:
                 print(f"[load-prices]     {c.note}")
@@ -244,10 +265,29 @@ class LoadPricesSummary:
             f"skipped:no_prices_file {no_file}, anomalies {anomalies}"
         )
         print(f"[load-prices] points: inserted {inserted}, already present {duplicates}")
+
+        ucoin_dropped = sum(c.ucoin_dropped for c in self.coins)
+        ucoin_present = sum(c.ucoin_present for c in self.coins)
+        if self.drop_ucoin:
+            print(
+                f"[load-prices] legacy uCoin snapshots deleted: {ucoin_dropped} "
+                "(only on coins that just got a ua-coins history)"
+            )
+        elif ucoin_present:
+            print(
+                f"[load-prices] legacy uCoin snapshots still on these coins: {ucoin_present} "
+                "-- they are dated later than some ua-coins histories, so the storefront "
+                "may show one as the price. Rerun with --drop-ucoin-prices to remove them."
+            )
         if self.rows_before is not None:
+            untouched = (
+                "(hand-entered snapshots untouched)"
+                if self.drop_ucoin
+                else "(uCoin and hand-entered snapshots untouched)"
+            )
             print(
                 f"[load-prices] {TABLE} row count: {self.rows_before} -> {self.rows_after} "
-                "(uCoin and hand-entered snapshots untouched)"
+                f"{untouched}"
             )
         if self.committed:
             print(
@@ -279,6 +319,45 @@ def _resolve_catalog_items(conn: psycopg.Connection, source_keys: list[str]) -> 
         {"keys": source_keys},
     ).fetchall()
     return {row[0]: row[1] for row in rows}
+
+
+def _count_ucoin(conn: psycopg.Connection, item_ids: list[int]) -> dict[int, int]:
+    """{catalog_item_id: how many shared uCoin snapshots it still has}."""
+    if not item_ids:
+        return {}
+    rows = conn.execute(
+        f"SELECT catalog_item_id, COUNT(*) FROM {TABLE} "
+        "WHERE catalog_item_id = ANY(%(ids)s) AND source = %(source)s AND created_by IS NULL "
+        "GROUP BY catalog_item_id",
+        {"ids": item_ids, "source": UCOIN_SOURCE},
+    ).fetchall()
+    return {item_id: count for item_id, count in rows}
+
+
+def _drop_ucoin(conn: psycopg.Connection, item_ids: list[int]) -> dict[int, int]:
+    """Delete the legacy uCoin history of these coins; returns what went.
+
+    `item_ids` is only ever the coins whose ua-coins history this very run
+    loaded. That is the whole safety argument: a coin cannot be left
+    without a price by this, because it just got one. A coin with no
+    ua-coins match never reaches here, so its uCoin rows -- the only
+    prices it has -- stay untouched.
+
+    created_by IS NULL keeps it to the central importer's rows. A
+    collector's own uCoin snapshot is their record, not legacy of ours.
+    """
+    if not item_ids:
+        return {}
+    rows = conn.execute(
+        f"DELETE FROM {TABLE} "
+        "WHERE catalog_item_id = ANY(%(ids)s) AND source = %(source)s AND created_by IS NULL "
+        "RETURNING catalog_item_id",
+        {"ids": item_ids, "source": UCOIN_SOURCE},
+    ).fetchall()
+    dropped: dict[int, int] = {}
+    for (item_id,) in rows:
+        dropped[item_id] = dropped.get(item_id, 0) + 1
+    return dropped
 
 
 def _create_tmp_table(conn: psycopg.Connection) -> None:
@@ -472,15 +551,45 @@ def _run_transaction(
         report.inserted = inserted_by_item.get(item_id, 0)
         report.duplicates = report.points - report.inserted
 
+    _handle_ucoin(conn, loadable, summary)
+
     summary.rows_after = conn.execute(f"SELECT COUNT(*) FROM {TABLE}").fetchone()[0]
+
+
+def _handle_ucoin(
+    conn: psycopg.Connection,
+    loadable: list[tuple[PriceCoinReport, int]],
+    summary: LoadPricesSummary,
+) -> None:
+    """Count -- and, when asked, delete -- the legacy uCoin history of the
+    coins this run just gave a ua-coins history to.
+
+    Counting always happens, because a uCoin row that is left behind is
+    not harmless: the storefront shows the LATEST snapshot whatever its
+    source, and these rows are dated later than some ua-coins histories.
+    So a run that does not drop them says how many are sitting there and
+    what to type to remove them.
+    """
+    item_ids = [item_id for _, item_id in loadable]
+    present = _count_ucoin(conn, item_ids)
+    for report, item_id in loadable:
+        report.ucoin_present = present.get(item_id, 0)
+
+    if not summary.drop_ucoin:
+        return
+
+    dropped = _drop_ucoin(conn, item_ids)
+    for report, item_id in loadable:
+        report.ucoin_dropped = dropped.get(item_id, 0)
 
 
 def load_prices(
     series_slug: str | None = None,
     dsn: str | None = None,
     staging_root: Path = DEFAULT_STAGING_ROOT,
+    drop_ucoin: bool = False,
 ) -> LoadPricesSummary:
-    summary = LoadPricesSummary(series=series_slug)
+    summary = LoadPricesSummary(series=series_slug, drop_ucoin=drop_ucoin)
 
     ready, early = _collect(staging_root, series_slug, summary)
 

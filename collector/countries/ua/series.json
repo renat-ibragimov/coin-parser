@@ -1,7 +1,7 @@
 {
   "country": "ua",
   "original_lang": "uk",
-  "generated_at": "2026-09-08T14:29:23.640183+00:00",
+  "generated_at": "2026-09-09T09:43:56.575495+00:00",
   "series": [
     {
       "is_official": true,
@@ -152,9 +152,9 @@
         "uk": "Інші монети",
         "en": "Other coins"
       },
-      "nbu_card_count": 99,
+      "nbu_card_count": 149,
       "year_range": [
-        2012,
+        1996,
         2026
       ],
       "slug": "inshi-monety"

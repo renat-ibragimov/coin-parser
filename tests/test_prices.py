@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 
+import collector.countries.ua.load_prices as load_prices_mod
 from collector.countries.ua.load_prices import (
     CURRENCY,
     GRADE,
@@ -485,3 +486,89 @@ def test_cached_ua_coins_id_detects_a_rematched_card(tmp_path):
     # a second file beside the first, both looking current.
     _write_meta(tmp_path, "nbu:161", 2441)
     assert cached_ua_coins_id(tmp_path, "nbu:161") != 2449
+
+
+# ---------------------------------------------------------------------- #
+# dropping the legacy uCoin history (load_prices._handle_ucoin)
+#
+# The SQL itself needs a real Postgres, but the rule that makes this safe
+# -- only ever touching the coins whose ua-coins history this run just
+# loaded -- is worth pinning down, so the statements are captured against
+# a stand-in connection and asserted on.
+# ---------------------------------------------------------------------- #
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    """Answers the two statements _handle_ucoin issues and records them."""
+
+    def __init__(self, counts=None, deleted=None):
+        self.counts = counts or {}
+        self.deleted = deleted or {}
+        self.statements = []
+
+    def execute(self, sql, params=None):
+        self.statements.append((sql, params))
+        if sql.lstrip().startswith("DELETE"):
+            rows = [(item_id,) for item_id, n in self.deleted.items() for _ in range(n)]
+            return _Result(rows)
+        return _Result(list(self.counts.items()))
+
+    @property
+    def deletes(self):
+        return [(s, p) for s, p in self.statements if s.lstrip().startswith("DELETE")]
+
+
+def _loadable(*ids):
+    reports = [
+        load_prices_mod.PriceCoinReport(ua_coins_id=100 + i, source_id=f"nbu:{i}", status="loaded")
+        for i in ids
+    ]
+    return list(zip(reports, ids)), reports
+
+
+def test_ucoin_rows_are_counted_but_kept_without_the_flag():
+    loadable, reports = _loadable(559, 560)
+    conn = _FakeConn(counts={559: 2, 560: 1})
+    summary = load_prices_mod.LoadPricesSummary(drop_ucoin=False)
+    load_prices_mod._handle_ucoin(conn, loadable, summary)
+    assert [r.ucoin_present for r in reports] == [2, 1]
+    assert [r.ucoin_dropped for r in reports] == [0, 0]
+    assert conn.deletes == []
+
+
+def test_ucoin_rows_are_deleted_with_the_flag():
+    loadable, reports = _loadable(559, 560)
+    conn = _FakeConn(counts={559: 2, 560: 1}, deleted={559: 2, 560: 1})
+    summary = load_prices_mod.LoadPricesSummary(drop_ucoin=True)
+    load_prices_mod._handle_ucoin(conn, loadable, summary)
+    assert [r.ucoin_dropped for r in reports] == [2, 1]
+    assert len(conn.deletes) == 1
+
+
+def test_only_the_coins_loaded_this_run_are_ever_touched():
+    # The whole safety argument: a coin ua-coins does not quote never
+    # reaches `loadable`, so its uCoin rows -- its only prices -- are not
+    # in the ids the DELETE is given.
+    loadable, _ = _loadable(559, 560)
+    conn = _FakeConn(counts={}, deleted={})
+    summary = load_prices_mod.LoadPricesSummary(drop_ucoin=True)
+    load_prices_mod._handle_ucoin(conn, loadable, summary)
+    _sql, params = conn.deletes[0]
+    assert params["ids"] == [559, 560]
+    assert params["source"] == "uCoin"
+    assert "created_by IS NULL" in _sql
+
+
+def test_nothing_loaded_means_no_statements_at_all():
+    conn = _FakeConn()
+    summary = load_prices_mod.LoadPricesSummary(drop_ucoin=True)
+    load_prices_mod._handle_ucoin(conn, [], summary)
+    assert conn.statements == []

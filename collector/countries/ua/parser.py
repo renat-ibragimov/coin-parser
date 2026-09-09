@@ -443,14 +443,18 @@ class ParserUkraine:
             series_slug=self.staging.slug, dsn=dsn, staging_root=self.staging_root
         )
 
-    def load_prices(self, dsn: str | None = None):
+    def load_prices(self, dsn: str | None = None, drop_ucoin: bool = False):
         """Price history for one series if this parser has one, otherwise
         for every series staged on disk. The price cache is shared, so
-        both are meaningful -- see load_prices.build_card_index."""
+        both are meaningful -- see load_prices.build_card_index.
+
+        drop_ucoin additionally deletes the legacy uCoin history of the
+        coins that just got a ua-coins one."""
         return load_prices(
             series_slug=self.staging.slug if self.staging is not None else None,
             dsn=dsn,
             staging_root=self.staging_root,
+            drop_ucoin=drop_ucoin,
         )
 
     # ------------------------------------------------------------------ #

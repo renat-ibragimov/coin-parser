@@ -1,0 +1,306 @@
+# Как залить одну серию в прод
+
+Пошаговый регламент: от «серии нет нигде» до «серия на сайте с фото и
+историей цен». Написан по итогам первой полной проводки — пилотной
+серии «2000-ліття Різдва Христового», 9 сентября 2026.
+
+Читать вместе с `02_series_artifacts.md` (что каждый шаг оставляет на
+диске) и `01_findings.md` (почему шаги устроены именно так).
+
+---
+
+## 1. Что настроить один раз
+
+### Доступ к серверу
+
+Сервер — Hetzner, пользователь `deploy`, SSH на нестандартном порту.
+Чтобы не таскать `-p` и IP в каждой команде, заведите алиас в
+`~/.ssh/config`:
+
+```
+Host coinkeeper
+    HostName <ip сервера>
+    Port <ssh-порт>
+    User deploy
+```
+
+Дальше во всех командах ниже — просто `coinkeeper`. Проверка:
+
+```
+ssh coinkeeper 'hostname; docker compose -f ~/coinkeeper/docker-compose.yml ps --format "{{.Service}} {{.State}}"'
+```
+
+Должны быть `api`, `postgres`, `minio`, `redis` в состоянии `running`.
+
+### Канал до postgres
+
+Порт postgres **не опубликован на хосте** — ни наружу, ни на loopback
+сервера. Обычный `ssh -L 5432:localhost:5432` не сработает: слушать
+там нечего. Туннель ведётся **на IP контейнера в docker-сети**:
+
+```
+PGIP=$(ssh coinkeeper 'cd ~/coinkeeper && docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" $(docker compose ps -q postgres)')
+ssh -f -N -L 15432:$PGIP:5432 coinkeeper
+```
+
+IP выдаётся docker'ом и меняется, если сеть пересоздавали
+(`docker compose down` и обратно), поэтому его каждый раз берут
+командой, а не помнят наизусть.
+
+### Переменные окружения
+
+```
+export DATABASE_URL="postgresql:///coinkeeper"
+export PGHOST=127.0.0.1 PGPORT=15432 PGUSER=coinkeeper
+export PGPASSWORD=$(ssh coinkeeper 'grep -m1 "^POSTGRES_PASSWORD=" ~/coinkeeper/.env | cut -d= -f2-')
+```
+
+`DATABASE_URL` шаги требуют непустым, но всё остальное libpq берёт из
+`PG*` — так пароль не попадает ни в строку подключения, ни в логи, ни в
+историю команд. Он лежит на сервере в `~/coinkeeper/.env`, локально его
+хранить незачем.
+
+Проверка канала:
+
+```
+python -c "import psycopg,os; print(psycopg.connect(os.environ['DATABASE_URL']).execute('select current_database(), count(*) from coin_series').fetchone())"
+```
+
+**Туннель, поднятый через `ssh -f`, живёт в фоне и может не пережить
+смену сессии оболочки.** Если шаг падает с `Connection refused` —
+туннель отвалился, поднимите заново. Надёжнее держать туннель и команду
+в одном терминале.
+
+---
+
+## 2. Порядок шагов
+
+Слева направо, менять местами нельзя.
+
+| # | Шаг | Куда пишет | Сеть |
+|---|---|---|---|
+| 1 | `--step series` | `countries/ua/series.json` | bank.gov.ua |
+| 2 | `--step all` | `staging/ua/<slug>/` | bank.gov.ua, ua-coins |
+| 3 | `--step fetch-prices` | `staging/ua/_ua_coins/prices/` | ua-coins |
+| 4 | `--step load-series` | БД: `coin_series` | — |
+| 5 | rsync + `mc mirror` | бакет MinIO | сервер |
+| 6 | `--step load-cards` | БД: `catalog_items`, `media_files`, `price_source_links` | — |
+| 7 | `--step load-prices` | БД: `market_price_snapshots` | — |
+
+Шаги 1–3 только читают сеть и пишут на диск; 4–7 пишут в прод.
+
+**Шаг 5 обязан идти до шага 6.** `load-cards` удаляет старые общие
+строки `media_files` и ставит свои, указывающие на ключи в бакете. Если
+объектов там ещё нет — на живом сайте будут карточки без картинок.
+Наоборот безопасно: лишние объекты в бакете никому не мешают.
+
+---
+
+## 3. Сбор (локально, сеть)
+
+```
+python -m collector ua --step series          # только если словарь мог устареть
+python -m collector ua --series "<назва серії>" --step all
+python -m collector ua --series "<назва серії>" --step fetch-prices
+```
+
+`<назва серії>` — **точно** `names.uk` из `series.json`, байт в байт.
+Не «как принято писать», а как написано в справочнике: НБУ использует в
+названиях разные апострофоподобные символы, и от того, какой вы
+набрали, зависит имя каталога в `staging/`. Набрали не тот — соберёте
+серию в один каталог, а `load-cards` пойдёт искать в другой и скажет
+«no parsed cards». Уже наступали: `antychni-pamiatky-ukrainy` на диске
+против `antychni-pam-iatky-ukrainy` в справочнике.
+
+Надёжный способ узнать написание:
+
+```
+python -c "import json;print('\n'.join(e['names']['uk'] for e in json.load(open('collector/countries/ua/series.json'))['series']))"
+```
+
+### Что проверить перед заливкой
+
+```
+staging/ua/<slug>/parsed/anomalies.json   пустой список — карточки все разобраны
+staging/ua/<slug>/parsed/unmatched.json   тут норма не пустота, а понимание:
+                                          у этих монет не будет истории цен
+staging/ua/<slug>/parsed/photos.json      у каждой карточки обе роли с winner,
+                                          anomalies пуст, pair_silhouette_iou > 0.93
+```
+
+Непустой `anomalies.json` чинится дописыванием значения в `vocab.py` и
+повторным `--step parse` — но не угадыванием.
+
+---
+
+## 4. Серии в БД
+
+Нужен, только если `series.json` менялся (шаг 1 что-то поправил) или
+серия новая. Идёт по всему справочнику сразу, не по одной серии.
+
+```
+python -m collector ua --step load-series
+python -m collector ua --step load-series      # проверка: updated 0
+```
+
+Если серия новая, шаг вставит её и допишет id в `db_map.json` —
+**этот файл надо закоммитить**, без него `load-cards` не найдёт
+`series_id` и остановится с «run load-series first».
+
+---
+
+## 5. Медиа в бакет
+
+```
+SLUG=<slug>
+ssh coinkeeper "mkdir -p ~/media-drop/$SLUG"
+rsync -av staging/ua/$SLUG/media/out/ coinkeeper:~/media-drop/$SLUG/
+
+ssh coinkeeper "cd ~/coinkeeper && docker compose run --rm -v ~/media-drop:/drop \
+  --entrypoint /bin/sh minio-init -c \
+  'mc alias set local http://minio:9000 \$S3_ACCESS_KEY \$S3_SECRET_KEY && \
+   mc mirror --overwrite /drop/$SLUG/ local/\$S3_BUCKET/catalog-src/'"
+```
+
+Экранированные `\$S3_*` — не опечатка: переменные должны раскрыться
+**внутри контейнера** `minio-init`, где они и заданы, а не в оболочке
+сервера, где их нет.
+
+`mc mirror` копирует каталогами, поэтому `media/out/nbu_88/obverse_600.webp`
+становится ключом `catalog-src/nbu_88/obverse_600.webp` — ровно тем,
+что `load-cards` пропишет в `media_files.storage_key`. Ключ не содержит
+`catalog_item_id` именно поэтому: на момент зеркалирования строки может
+ещё не быть, а у усыновляемой записи id непредсказуем.
+
+Проверка, что ключи совпали с ожидаемыми:
+
+```
+python - <<'EOF'
+from pathlib import Path
+from collector.countries.ua import load_cards as lc
+s = lc.LoadCardsSummary()
+plans, _ = lc.collect(Path("staging/ua/<slug>"), s)
+for p in plans:
+    for u in p.uploads:
+        for v in u.variants:
+            print(v.key)
+EOF
+```
+
+Сверить со списком в бакете (`mc ls --recursive local/$S3_BUCKET/catalog-src/`).
+
+---
+
+## 6. Монеты в БД
+
+```
+python -m collector ua --series "<назва серії>" --step load-cards
+python -m collector ua --series "<назва серії>" --step load-cards   # проверка
+```
+
+Второй прогон обязан дать `updated 0, adopted 0, unchanged N` и
+`media roles: written 0, unchanged 2N`. Любое другое — повод смотреть,
+что за поле «меняется» каждый раз.
+
+Что читать в отчёте:
+
+- **`insert`** — новая запись, `status='active'`;
+- **`update`** — запись уже была под `nbu:<N>`;
+- **`adopt`** — нашли запись uCoin-эпохи через её NBU-ссылку в
+  `price_source_links` и забрали себе: `source_key` сменился, **id
+  сохранён**, коллекционные позиции на нём остались целы;
+- **`unchanged`** — ничего не поменялось;
+- **`SKIPPED, listed in edited_fields`** — поле правил человек, шаг его
+  не трогает.
+
+`source links written 0` — норма, а не сбой: если ссылки уже указывают
+куда надо, они не переписываются, чтобы не двигать `matched_at`.
+
+---
+
+## 7. Цены
+
+```
+python -m collector ua --series "<назва серії>" --step load-prices --drop-ucoin-prices
+```
+
+`--drop-ucoin-prices` удаляет легаси-историю uCoin, но **только у тех
+монет, которым этот же прогон залил историю ua-coins**. Монета без пары
+на ua-coins в этот список не попадает, и её строки uCoin — единственные
+цены, какие у неё есть — остаются на месте.
+
+Зачем это вообще: витрина показывает самый свежий снапшот независимо от
+источника, а легаси-строки uCoin датированы летом 2026 и на драгметалле
+несут мусор (8.13 ₴ там, где ua-coins даёт 100 600 ₴). Оставленная
+строка перебивает нашу историю и показывается как цена монеты.
+
+**Перед удалением снимите бэкап** затрагиваемых строк:
+
+```
+ssh coinkeeper "cd ~/coinkeeper && docker compose exec -T postgres sh -c '
+psql -U \$POSTGRES_USER -d \$POSTGRES_DB -c \"
+COPY (select m.* from market_price_snapshots m
+      where m.source = \\\$\\\$uCoin\\\$\\\$
+        and m.catalog_item_id in (select id from catalog_items
+                                  where series_id = <id> and created_by is null)
+      order by m.id) TO STDOUT WITH CSV HEADER\"'" > ucoin-backup-<slug>.csv
+```
+
+Без флага шаг ничего не удаляет, но считает оставшиеся строки и пишет,
+сколько их, — забыть про них нельзя.
+
+Второй прогон: `inserted 0, already present N`.
+
+---
+
+## 8. Проверка результата
+
+```sql
+-- монет в серии, и у всех ли заполнено
+select i.id, i.source_key, i.series_id, i.material, i.quality,
+       i.descriptions is not null, i.artists is not null,
+       (select count(*) from media_files m
+        where m.catalog_item_id = i.id and m.owner_id is null) as media
+from catalog_items i
+where i.series_id = <id> and i.created_by is null order by i.id;
+
+-- что покажет витрина как цену
+select i.id, i.source_key, p.source, p.price, p.observed_at::date
+from catalog_items i
+join lateral (select m.source, m.price, m.observed_at
+              from market_price_snapshots m
+              where m.catalog_item_id = i.id and not m.is_suspect
+              order by m.observed_at desc, m.id desc limit 1) p on true
+where i.series_id = <id> and i.created_by is null order by i.id;
+```
+
+Дальше — глазами на сайте: серия, число монет, фото, цена и ссылка
+«джерело».
+
+---
+
+## 9. Что эти шаги НЕ делают
+
+- **не удаляют записи каталога** — никогда, ни при каких условиях;
+- **не трогают** `catalog_km`, `catalog_uc`, `catalog_numista`, `notes`,
+  `subtype`, архивные поля и всё, что перечислено в `edited_fields`;
+- **не меняют** `collection_group` и `created_by` у существующих
+  записей (у новых — ставят один раз при создании);
+- **не чистят** `price_source_links` источника uCoin и не создают их;
+- **не удаляют** объекты из бакета: заменённые фото остаются сиротами,
+  чистка бакета — отдельная задача;
+- **не меняют схему БД** — это зона coin_keeper.
+
+## 10. Известные расхождения, принятые сознательно
+
+**Вес драгметалла.** НБУ публикует только вагу у чистоті, а колонка
+`catalog_items.weight_grams` означает вес монеты. Для золота и серебра
+шаг пишет туда чистоту — то есть у 10 грн срібла в базе окажется 31,1 г
+вместо реальных 33,62. Решение: ждём отдельную колонку под чистоту в
+coin_keeper, до тех пор оставляем как есть. Затронутых украинских
+записей с уже проставленным весом — 281.
+
+**Подпись источника цены и ссылка «джерело» независимы.** Подпись берётся
+из источника показанного снапшота, ссылка — из `price_source_links` с
+предпочтением UA-Coins. Пока источники совпадают, разницы не видно; как
+разъедутся — на карточке будет одно название и ссылка в другое место.
