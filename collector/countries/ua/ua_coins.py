@@ -44,6 +44,15 @@ REQUEST_DELAY_RANGE = (2.5, 4.5)
 MAX_429_RETRIES = 5
 DEFAULT_429_BACKOFF_SECONDS = 30.0
 
+# Separate from the 429 handling above: transport-level failures (a
+# connection reset mid-response, a dropped socket) that ua-coins.info's
+# server produces now and then even outside rate-limiting -- e.g.
+# httpx.RemoteProtocolError "Server disconnected without sending a
+# response". These have nothing to do with pacing, so they get their own
+# short retry budget rather than consuming a 429 attempt.
+MAX_TRANSPORT_RETRIES = 3
+TRANSPORT_RETRY_BACKOFF_SECONDS = 3.0
+
 _ID_RE = re.compile(r"^(\d+)")
 
 
@@ -77,11 +86,13 @@ def get_with_retry(
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     """GET `path` off ua-coins.info, paced, with 429 backoff-retry
-    (respecting a Retry-After header if the server sends one). Shared by
-    every ua-coins.info caller in this adapter (catalog pages, coin
-    detail pages, image downloads, the signed price-chart endpoint) --
-    one rate-limit policy for the one host, so nothing accidentally
-    paces or retries differently.
+    (respecting a Retry-After header if the server sends one) and a
+    short separate retry for transport-level failures (connection reset,
+    dropped socket -- see MAX_TRANSPORT_RETRIES). Shared by every
+    ua-coins.info caller in this adapter (catalog pages, coin detail
+    pages, image downloads, the signed price-chart endpoint) -- one
+    rate-limit policy for the one host, so nothing accidentally paces or
+    retries differently.
 
     `headers` are merged over the client's own for this one request; the
     price-chart endpoint needs a Referer naming the coin page whose
@@ -89,7 +100,19 @@ def get_with_retry(
     """
     for attempt in range(1, MAX_429_RETRIES + 1):
         pacer.wait()
-        resp = client.get(path, headers=headers)
+        for transport_attempt in range(1, MAX_TRANSPORT_RETRIES + 1):
+            try:
+                resp = client.get(path, headers=headers)
+                break
+            except httpx.TransportError as exc:
+                if transport_attempt == MAX_TRANSPORT_RETRIES:
+                    raise
+                print(
+                    f"[ua_coins]   connection error for {log_label or path} "
+                    f"(attempt {transport_attempt}/{MAX_TRANSPORT_RETRIES}): {exc}, "
+                    f"retrying in {TRANSPORT_RETRY_BACKOFF_SECONDS:.0f}s..."
+                )
+                time.sleep(TRANSPORT_RETRY_BACKOFF_SECONDS)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After")
             delay = (
