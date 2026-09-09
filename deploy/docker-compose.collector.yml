@@ -1,38 +1,40 @@
-# The collector alongside coin_keeper, sharing its docker network.
+# The collector as its own compose project, next to coin_keeper -- not an
+# edit to coin_keeper's docker-compose.yml, which stays untouched.
 #
-# It joins coin_keeper's network as an EXTERNAL one rather than declaring
-# its own, which is the whole point: on that network postgres is reachable
-# as the host `postgres`, so nothing here has to look up a container IP
-# that docker reassigns on every recreate. Compare the old wrapper, which
-# did exactly that dance from the host.
-#
-# Nothing here is a long-running service -- every service is a one-shot
-# task started with `docker compose run --rm`.
+# The only thing borrowed from that stack is its network, joined here as
+# an external one. On it postgres is reachable as the host `postgres`, so
+# the container-IP lookup the host wrapper used to do is gone rather than
+# automated.
 #
 #   docker compose --env-file ~/coinkeeper/.env \
 #     -f deploy/docker-compose.collector.yml run --rm update-prices
 #
-# --env-file points at coin_keeper's own .env so POSTGRES_USER and
-# POSTGRES_PASSWORD are the stack's, kept in one place, and never copied
-# into this repository.
-name: collector
+# --env-file points at coin_keeper's OWN .env. That is deliberate: the
+# database password then exists in exactly one place on the server, is
+# never copied into this repository or a second dotenv, and reaches the
+# container as PGPASSWORD -- so it stays out of the connection string,
+# out of logs and out of `ps`. DATABASE_URL names only the database.
+name: coin-parser
 
 x-collector: &collector
   build:
     context: ..
     dockerfile: deploy/Dockerfile
-  image: coin-collector:latest
+    args:
+      UID: "${COLLECTOR_UID:-1000}"
+  image: coin-parser:latest
   environment:
-    # The steps require DATABASE_URL non-empty, but libpq takes the rest
-    # from PG*, so the password is never part of a connection string,
-    # a log line or `ps` output.
     DATABASE_URL: "postgresql:///${POSTGRES_DB:-coinkeeper}"
     PGHOST: "${PGHOST:-postgres}"
     PGPORT: "${PGPORT:-5432}"
     PGUSER: "${POSTGRES_USER:-coinkeeper}"
     PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing -- pass --env-file ~/coinkeeper/.env}"
   volumes:
-    - staging:/app/staging
+    # The checkout's own staging/, so the night's kept HTML can be read
+    # with ls instead of docker. Created by the wrapper before the run:
+    # left to docker, a missing bind-mount source is created as root and
+    # the container's own user cannot write into it.
+    - ../staging:/staging
   networks: [coinkeeper]
   restart: "no"
 
@@ -41,9 +43,8 @@ services:
     <<: *collector
     command: ["ua", "--step", "update-prices"]
 
-  # Anything else worth running against production from here, one-shot.
-  # `docker compose ... run --rm collector ua --step load-prices` also
-  # works; this service just spells the common case out.
+  # Any other step, one-shot:
+  #   docker compose ... run --rm collector ua --step load-prices
   collector:
     <<: *collector
 
@@ -51,6 +52,3 @@ networks:
   coinkeeper:
     external: true
     name: "${COINKEEPER_NETWORK:-coinkeeper_default}"
-
-volumes:
-  staging:

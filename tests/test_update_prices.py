@@ -9,6 +9,7 @@ its stored link, "немає даних", the COPY batch, and the one summary li
 a monitor greps.
 """
 
+import sys
 from datetime import date
 from decimal import Decimal
 
@@ -372,3 +373,46 @@ def test_prune_daily_removes_only_dated_dirs_past_the_window(tmp_path):
 
 def test_prune_daily_on_a_server_that_has_never_run_it(tmp_path):
     assert up.prune_daily(tmp_path, date(2026, 9, 9)) == []
+
+
+# ---------------------------------------------------------------------- #
+# the deployed image installs no image-processing stack
+# ---------------------------------------------------------------------- #
+
+
+def test_the_cli_starts_without_opencv_pillow_or_numpy(monkeypatch):
+    """The server's image installs httpx, selectolax and psycopg and stops.
+
+    parser.py used to import photos -- and so cv2, Pillow and numpy -- at
+    module level, which put a ~100 MB image-processing stack between the
+    nightly step and starting at all. This is what keeps that from
+    creeping back: not a size assertion, but the actual import failing
+    the way it would on a machine that does not have them.
+    """
+    import builtins
+
+    blocked = {"cv2", "PIL", "numpy"}
+    real_import = builtins.__import__
+
+    def guard(name, *args, **kwargs):
+        if name.split(".")[0] in blocked:
+            raise ModuleNotFoundError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guard)
+    for name in list(sys.modules):
+        if name.split(".")[0] in blocked or name.startswith("collector"):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    # The guard has to actually bite, or this test passes for the wrong
+    # reason the day monkeypatching stops reaching the import machinery.
+    with pytest.raises(ModuleNotFoundError):
+        import cv2  # noqa: F401
+
+    from collector.__main__ import build_arg_parser
+
+    args = build_arg_parser().parse_args(["ua", "--step", "update-prices"])
+    assert args.step == "update-prices"
+
+    # ...and the step's own module, which is what runs unattended.
+    from collector.countries.ua.update_prices import build_rows  # noqa: F401

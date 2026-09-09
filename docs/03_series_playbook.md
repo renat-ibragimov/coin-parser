@@ -319,39 +319,66 @@ staging на сервере не надо, и то, что там лежит (и
 добывание IP контейнера postgres: контейнер стоит в той же docker-сети,
 где postgres зовут просто `postgres`.
 
+На чистом сервере нужны только docker и git — ни питона, ни venv, ни
+`pip` на хосте (и не пытайтесь: системный python помечен
+externally-managed, а прод-образ `api` собран с read-only `$HOME` — обе
+попытки обойти это уже сделаны и обе отказали, см. `01_findings.md`).
+
 ```
 ssh coinkeeper
 git clone <repo> ~/coin-parser && cd ~/coin-parser   # или git pull, если уже есть
-mkdir -p ~/logs        # cron открывает лог ДО запуска скрипта, каталог должен быть
-docker compose --env-file ~/coinkeeper/.env \
-    -f deploy/docker-compose.collector.yml build
-crontab deploy/crontab
-crontab -l             # проверить, что встало
+mkdir -p ~/logs                    # cron открывает лог ДО скрипта, каталог должен быть
+docker network ls                  # найти сеть коинкипера, обычно coinkeeper_default
+docker compose --env-file ~/coinkeeper/.env -f deploy/docker-compose.collector.yml build
+./deploy/run-update-prices.sh; echo "exit=$?"     # ручной прогон
+crontab deploy/crontab                            # включить ночной
+crontab -l
 ```
 
-Один прогон руками, не дожидаясь ночи, — тем же скриптом, что и крон:
+Обновление после правок кода: `git pull` и та же команда `build`.
+
+**Где лежит пароль: только в `~/coinkeeper/.env`, и больше нигде.**
+`--env-file` отдаёт compose'у `POSTGRES_USER`/`POSTGRES_PASSWORD` самого
+стека, они уезжают в `PG*` контейнера, а `DATABASE_URL` остаётся
+`postgresql:///coinkeeper`. Пароль не попадает ни в строку подключения,
+ни в лог, ни в `ps` — то же разделение, что в разделе 1, и по той же
+причине его нет во втором dotenv: копия пароля означает второе место,
+где его надо менять при ротации. `deploy/.env` (по образцу
+`deploy/.env.example`) заводится, только если надо переопределить
+что-то **несекретное** — имя сети или uid; скрипт подхватывает его
+вторым `--env-file`, поверх коинкиперовского:
 
 ```
-~/coin-parser/deploy/run-update-prices.sh; echo "exit=$?"
+COINKEEPER_NETWORK=<имя из docker network ls>
+COLLECTOR_UID=$(id -u)
 ```
 
-Пароль никуда не копируется: `--env-file ~/coinkeeper/.env` отдаёт
-compose'у `POSTGRES_USER`/`POSTGRES_PASSWORD` самого стека, они уезжают в
-`PG*` контейнера, а `DATABASE_URL` остаётся `postgresql:///coinkeeper` —
-то же разделение, что в разделе 1.
+`COLLECTOR_UID` важен: контейнер пишет скачанный за ночь HTML в
+`~/coin-parser/staging/ua/_ua_coins/daily/<дата>/`, и если uid не совпадёт
+с владельцем чекаута, каталог станет нечитаемым с хоста. По умолчанию
+1000, что верно для `deploy`. Смотреть — обычным `ls`, докер не нужен;
+папки старше 14 дней шаг чистит сам.
 
-Если сеть стека называется не `coinkeeper_default` (проверить:
-`docker network ls`), имя задаётся переменной:
-`COINKEEPER_NETWORK=<имя> ~/coin-parser/deploy/run-update-prices.sh`.
-
-Скачанный за ночь HTML лежит в докер-томе `collector_staging`, а не в
-чекауте — том переживает пересборку образа, и именно его чистит сам шаг.
-Посмотреть: `docker run --rm -v collector_staging:/s alpine ls /s/ua/_ua_coins/daily`.
-
-Образ ставит только `httpx`, `selectolax` и `psycopg` — около 180 МБ.
+Образ ставит только `httpx`, `selectolax` и `psycopg` — 177 МБ.
 Фотопайплайн (opencv, Pillow, numpy) вынесен в extra `photos` и на
 сервер не едет вообще; локально ставится как
 `pip install -e ".[photos,dev]"`.
+
+### Разовая уборка хоста
+
+После неудачных попыток поставить шаг на хост там могло остаться:
+
+```
+pip list --user                      # посмотреть, ЧТО там, прежде чем сносить
+rm -rf ~/.local/lib/python3.12 ~/.local/bin/pip*
+
+docker ps -a --filter name=coinkeeper-api-run- -q | xargs -r docker rm
+```
+
+Вторая команда убирает сирот от прежних `docker compose run`. Точечно и
+именно так: `docker compose down --remove-orphans` на compose-файле
+коинкипера **уронит сайт**, а `run --remove-orphans` без имени сервиса
+просто не запустится.
 
 ### Проверка назавтра
 

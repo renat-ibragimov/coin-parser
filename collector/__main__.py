@@ -31,8 +31,11 @@ section of the playbook.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
+from collector.core.staging import DEFAULT_STAGING_ROOT
 from collector.countries.ua.parser import ParserUkraine
 
 
@@ -76,6 +79,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     ua.add_argument(
+        "--staging-root",
+        default=os.environ.get("COLLECTOR_STAGING_ROOT") or str(DEFAULT_STAGING_ROOT),
+        help=(
+            "where the staging tree lives (default: ./staging, or "
+            "COLLECTOR_STAGING_ROOT). The deployed container mounts a volume "
+            "elsewhere and sets that variable, so its working directory does not "
+            "have to be writable"
+        ),
+    )
+    ua.add_argument(
         "--refresh-ua-coins",
         action="store_true",
         help="refetch cached ua-coins.info yearly catalog pages instead of reusing staging/ua/_ua_coins/raw",
@@ -112,13 +125,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.country != "ua":
         return 0
 
+    staging_root = Path(args.staging_root)
+
     if args.step == "series":
-        parser = ParserUkraine()
+        parser = ParserUkraine(staging_root=staging_root)
         summary = parser.collect_series()
         return 1 if summary.conflicts else 0
 
     if args.step == "load-series":
-        parser = ParserUkraine()
+        parser = ParserUkraine(staging_root=staging_root)
         summary = parser.load_series()
         return 1 if summary.error else 0
 
@@ -126,13 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         # The cron step. Nothing about it is per-series (its scope is the
         # catalog itself), and its exit code is the whole report as far
         # as cron is concerned: 0 fine, 1 some years lost, 2 nothing done.
-        return ParserUkraine().update_prices().exit_code
+        return ParserUkraine(staging_root=staging_root).update_prices().exit_code
 
     if args.step == "load-prices":
         # Unlike the other per-series steps this one runs with or without
         # --series: the price cache is shared across series, so "load
         # everything staged" is just as meaningful as "load this series".
-        parser = ParserUkraine(series=args.series) if args.series else ParserUkraine()
+        parser = (
+            ParserUkraine(series=args.series, staging_root=staging_root)
+            if args.series
+            else ParserUkraine(staging_root=staging_root)
+        )
         summary = parser.load_prices(drop_ucoin=args.drop_ucoin_prices)
         return 1 if summary.error else 0
 
@@ -144,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    parser = ParserUkraine(series=args.series)
+    parser = ParserUkraine(series=args.series, staging_root=staging_root)
 
     if args.step == "load-cards":
         summary = parser.load_cards()

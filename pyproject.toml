@@ -26,3 +26,14 @@ dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 include = ["collector*"]
+
+# The adapter's dictionaries live next to its code and are part of the
+# package, not incidental files in the checkout: series.json is the
+# series dictionary every fetch resolves a name against, db_map.json the
+# series -> coin_keeper id map load-cards needs. Without this they are
+# simply absent from a non-editable install, and the failure is
+# invisible until something asks for them -- an install run from the
+# source tree keeps working, because then the source tree is what gets
+# imported.
+[tool.setuptools.package-data]
+collector = ["countries/*/*.json"]

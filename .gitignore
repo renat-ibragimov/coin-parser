@@ -222,3 +222,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Optional non-secret compose overrides; the real .env lives on the server.
+deploy/.env
