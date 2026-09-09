@@ -4,10 +4,19 @@ watching (deploy/crontab), which changes several things about it.
 
 What it does, once per night:
 
-    1. scope comes from the DATABASE, not from staging -- every shared,
-       active catalog_items row whose source_key is "nbu:*". The server
-       has no staging tree worth trusting and cards.json says what one
-       collection run happened to see, not what the catalog holds.
+    1. scope comes from the DATABASE, not from staging -- the shared,
+       active catalog_items rows whose source_key is "nbu:*" AND whose
+       series is one this repo has actually finished (db_map.json's
+       "completed" list). The server has no staging tree worth trusting,
+       and cards.json says what one collection run happened to see,
+       rather than what the catalog holds.
+
+       The series filter is the important half. The catalog also holds
+       NBU coins nobody here collected -- coin_keeper's own pipeline
+       made them, with UA-Coins links this repo never confirmed -- and
+       quoting a coin through an unverified link is how a price ends up
+       on the wrong coin. A series joins the list by hand, as the last
+       step of loading it, and not before.
     2. the years those coins were issued in (plus/minus one, the same
        year_shift the matcher allows) are downloaded from ua-coins as
        whole catalog pages -- ONE request per year, not per coin. The
@@ -61,6 +70,7 @@ from collector.countries.ua.load_prices import (
     create_tmp_table,
     insert_from_tmp,
 )
+from collector.countries.ua.load_series import load_db_map
 from collector.countries.ua.nbu_client import USER_AGENT
 from collector.countries.ua.prices import MAX_PRICE, PricePoint
 
@@ -107,13 +117,53 @@ class ScopeCoin:
     ua_coins_id: int | None = None
 
 
-def fetch_scope(conn: psycopg.Connection) -> list[ScopeCoin]:
-    """Every shared, active NBU coin in the production catalog.
+def completed_series(db_map: dict | None = None) -> tuple[list[int], list[str]]:
+    """(coin_series ids, slugs) of the series this repo has finished.
+
+    Read from db_map.json's "completed" list, which is maintained by hand
+    as the last step of loading a series. An empty or missing list is an
+    ERROR here, not an empty night: a nightly job that quietly does
+    nothing for weeks because of a configuration slip is worse than one
+    that says so on the first morning.
+    """
+    db_map = db_map if db_map is not None else load_db_map()
+    slugs = db_map.get("completed") or []
+    if not slugs:
+        raise RuntimeError(
+            "db_map.json has no non-empty \"completed\" list -- nothing is marked as "
+            "a finished series, so there is nothing this step may touch. Add a series "
+            "to it as the last step of loading one (docs/03_series_playbook.md)."
+        )
+
+    mapping = db_map.get("series") or {}
+    ids: list[int] = []
+    unknown: list[str] = []
+    for slug in slugs:
+        series_id = mapping.get(slug)
+        if series_id is None:
+            unknown.append(slug)
+        else:
+            ids.append(int(series_id))
+    if unknown:
+        raise RuntimeError(
+            f"db_map.json lists {unknown} as completed, but has no coin_series id for "
+            "them -- run --step load-series, or fix the slug"
+        )
+    return sorted(set(ids)), list(slugs)
+
+
+def fetch_scope(conn: psycopg.Connection, series_ids: list[int]) -> list[ScopeCoin]:
+    """The shared, active NBU coins of the finished series.
 
     created_by IS NULL is not optional and is the same rule load_prices
     follows: source_key is unique per USER, so "nbu:88" legitimately
     exists again as some collector's private copy, and the central
     snapshots belong to the shared row only.
+
+    series_id narrows it to what this repo actually collected and
+    checked. Without it the scope is the whole NBU catalog, most of which
+    came from coin_keeper's own pipeline and carries links nobody here
+    confirmed.
     """
     rows = conn.execute(
         f"""
@@ -122,8 +172,10 @@ def fetch_scope(conn: psycopg.Connection) -> list[ScopeCoin]:
         WHERE source_key LIKE 'nbu:%%'
           AND created_by IS NULL
           AND status = 'active'
+          AND series_id = ANY(%(series_ids)s)
         ORDER BY id
-        """
+        """,
+        {"series_ids": series_ids},
     ).fetchall()
     return [ScopeCoin(item_id=r[0], source_key=r[1], issue_year=r[2]) for r in rows]
 
@@ -377,6 +429,7 @@ def build_rows(
 @dataclass
 class UpdatePricesSummary:
     run_date: date | None = None
+    series: list[str] = field(default_factory=list)
     scope: int = 0
     years_ok: list[int] = field(default_factory=list)
     years_failed: list[int] = field(default_factory=list)
@@ -442,7 +495,8 @@ class UpdatePricesSummary:
         inserted + dup."""
         return (
             f"update-prices {self.status_word()} "
-            f"scope={self.scope} years={len(self.years_ok)} matched={self.matched} "
+            f"series={len(self.series)} scope={self.scope} "
+            f"years={len(self.years_ok)} matched={self.matched} "
             f"inserted={self.inserted} dup={self.duplicates} "
             f"no_quote={self.no_quote} no_link={self.no_link} errors={self.errors}"
         )
@@ -450,6 +504,11 @@ class UpdatePricesSummary:
     def print_report(self) -> None:
         stamp = self.run_date.isoformat() if self.run_date else "?"
         print(f"[update-prices] run {stamp} -- {TABLE} in coin_keeper")
+        if self.series:
+            print(
+                f"[update-prices]   finished series only ({len(self.series)}): "
+                + ", ".join(self.series)
+            )
         if self.error:
             print(f"[update-prices]   ERROR: {self.error}")
 
@@ -533,6 +592,14 @@ def update_prices(
     summary = UpdatePricesSummary(run_date=run_date)
 
     try:
+        series_ids, series_slugs = completed_series()
+    except (RuntimeError, OSError, ValueError) as exc:
+        summary.error = f"{type(exc).__name__}: {exc}" if not isinstance(exc, RuntimeError) else str(exc)
+        summary.print_report()
+        return summary
+    summary.series = series_slugs
+
+    try:
         dsn = dsn or get_database_url()
     except RuntimeError as exc:
         summary.error = str(exc)
@@ -544,7 +611,7 @@ def update_prices(
     # is a session an ssh tunnel gets to drop.
     try:
         with psycopg.connect(dsn) as conn:
-            scope = fetch_scope(conn)
+            scope = fetch_scope(conn, series_ids)
             attach_links(conn, scope)
     except Exception as exc:
         summary.error = f"reading the catalog: {type(exc).__name__}: {exc}"
@@ -552,7 +619,10 @@ def update_prices(
         return summary
 
     summary.scope = len(scope)
-    print(f"[update-prices] {len(scope)} shared active nbu:* coin(s) in the catalog")
+    print(
+        f"[update-prices] {len(scope)} shared active nbu:* coin(s) "
+        f"in {len(series_slugs)} finished series"
+    )
 
     no_year = [c.source_key for c in scope if c.issue_year is None]
     if no_year:

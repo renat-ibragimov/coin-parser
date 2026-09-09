@@ -273,8 +273,8 @@ def test_build_rows_refuses_a_price_the_column_cannot_hold():
 
 
 def _summary(**kwargs):
-    summary = up.UpdatePricesSummary(run_date=date(2026, 9, 9), **kwargs)
-    return summary
+    kwargs.setdefault("series", ["2000-littia-rizdva-khrystovoho"])
+    return up.UpdatePricesSummary(run_date=date(2026, 9, 9), **kwargs)
 
 
 def _report(status, inserted=0, duplicates=0):
@@ -297,7 +297,7 @@ def test_summary_line_counts_every_bucket():
         ],
     )
     assert summary.summary_line() == (
-        "update-prices ok scope=6 years=3 matched=3 inserted=2 dup=1 "
+        "update-prices ok series=1 scope=6 years=3 matched=3 inserted=2 dup=1 "
         "no_quote=2 no_link=1 errors=0"
     )
     assert summary.exit_code == up.EXIT_OK
@@ -337,10 +337,10 @@ def test_every_year_lost_is_nothing_done():
 
 
 def test_no_database_is_nothing_done_and_still_prints_the_line():
-    summary = _summary(error="DATABASE_URL is not set")
+    summary = _summary(series=[], error="DATABASE_URL is not set")
     assert summary.exit_code == up.EXIT_NOTHING_DONE
     assert summary.summary_line() == (
-        "update-prices failed scope=0 years=0 matched=0 inserted=0 dup=0 "
+        "update-prices failed series=0 scope=0 years=0 matched=0 inserted=0 dup=0 "
         "no_quote=0 no_link=0 errors=1"
     )
 
@@ -416,3 +416,60 @@ def test_the_cli_starts_without_opencv_pillow_or_numpy(monkeypatch):
 
     # ...and the step's own module, which is what runs unattended.
     from collector.countries.ua.update_prices import build_rows  # noqa: F401
+
+
+# ---------------------------------------------------------------------- #
+# the scope is the finished series, not the catalogue
+# ---------------------------------------------------------------------- #
+
+
+def test_completed_series_resolves_slugs_to_coin_series_ids():
+    db_map = {"series": {"a": 8, "b": 10, "c": 12}, "completed": ["a", "c"]}
+    assert up.completed_series(db_map) == ([8, 12], ["a", "c"])
+
+
+def test_an_empty_completed_list_is_an_error_not_a_quiet_night():
+    """A cron job that does nothing for weeks because of a config slip is
+    worse than one that fails on the first morning."""
+    with pytest.raises(RuntimeError, match="completed"):
+        up.completed_series({"series": {"a": 8}, "completed": []})
+    with pytest.raises(RuntimeError, match="completed"):
+        up.completed_series({"series": {"a": 8}})
+
+
+def test_a_completed_slug_with_no_series_id_is_an_error():
+    with pytest.raises(RuntimeError, match="no coin_series id"):
+        up.completed_series({"series": {"a": 8}, "completed": ["a", "typo"]})
+
+
+def test_the_repos_own_db_map_resolves():
+    ids, slugs = up.completed_series()
+    assert ids and slugs and all(isinstance(i, int) for i in ids)
+
+
+class _FakeConn:
+    """Just enough psycopg to see what fetch_scope asks for."""
+
+    def __init__(self):
+        self.sql = None
+        self.params = None
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        self.params = params
+        return self
+
+    def fetchall(self):
+        return [(1, "nbu:88", 1999)]
+
+
+def test_fetch_scope_filters_by_series_and_by_the_shared_catalogue():
+    conn = _FakeConn()
+    scope = up.fetch_scope(conn, [8, 12])
+
+    assert conn.params == {"series_ids": [8, 12]}
+    assert "series_id = ANY(%(series_ids)s)" in conn.sql
+    # The two conditions that were already load-prices' rules.
+    assert "created_by IS NULL" in conn.sql
+    assert "status = 'active'" in conn.sql
+    assert scope[0].source_key == "nbu:88"
