@@ -4,6 +4,10 @@
     python -m collector ua --step series
     python -m collector ua --step load-series   # writes to coin_keeper's DB, needs DATABASE_URL
     python -m collector ua --series "<name>" --step fetch-prices
+    python -m collector ua --series "<name>" --step load-cards
+                                                # writes to coin_keeper's DB, needs DATABASE_URL
+                                                # mirror media/out into the bucket FIRST --
+                                                # see collector/countries/ua/load_cards.py
     python -m collector ua --step load-prices   # writes to coin_keeper's DB, needs DATABASE_URL
                                                 # --series narrows it to one series
 """
@@ -41,13 +45,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "fetch-photos",
             "process-photos",
             "fetch-prices",
+            "load-cards",
             "load-prices",
         ],
         default="all",
         help=(
             "which step to run ('all' = fetch, parse, match, fetch-photos, process-photos "
-            "-- fetch-prices/load-prices stay out of 'all' on purpose: one hits the "
-            "network hard, the other writes to production)"
+            "-- fetch-prices/load-cards/load-prices stay out of 'all' on purpose: one hits "
+            "the network hard, the other two write to production, and load-cards needs the "
+            "media mirrored into the bucket first)"
         ),
     )
     ua.add_argument(
@@ -104,6 +110,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     parser = ParserUkraine(series=args.series)
+
+    if args.step == "load-cards":
+        summary = parser.load_cards()
+        return 1 if summary.error else 0
+
     if args.step in ("fetch", "all"):
         parser.fetch()
     if args.step in ("parse", "all"):

@@ -287,7 +287,17 @@ def _run_transaction(
             new_id = _execute_insert(conn, values)
             db_map[slug] = new_id
             db_map_dirty = True
-            summary.rows.append(SeriesRowReport(slug=slug, db_id=new_id, action="insert", changes=values))
+            summary.rows.append(
+                SeriesRowReport(
+                    slug=slug,
+                    db_id=new_id,
+                    action="insert",
+                    # print_report reads changes as {column: (old, new)};
+                    # handing it the bare values made a new series' report
+                    # blow up on unpacking a string.
+                    changes={col: (None, value) for col, value in values.items()},
+                )
+            )
 
     summary.row_count_after = conn.execute(f"SELECT COUNT(*) FROM {TABLE}").fetchone()[0]
     return db_map_dirty

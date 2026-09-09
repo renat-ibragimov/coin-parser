@@ -5,6 +5,8 @@ Three independent steps:
   parse()          -- staging/ua/<slug>/raw/*.html -> staging/ua/<slug>/parsed/cards.json (no network)
   collect_series()  -- network -> countries/ua/series.json (committed, not staging)
   fetch_prices()   -- network -> staging/ua/_ua_coins/prices/*.json (shared, not per-series)
+  load_cards()     -- staging/ua/<slug> -> coin_keeper's catalog_items + media_files
+                      + price_source_links
   load_prices()    -- staging/ua/_ua_coins/prices -> coin_keeper's market_price_snapshots
 
 fetch()/parse() require a known series (see countries/ua/series.json,
@@ -35,6 +37,7 @@ from collector.countries.ua.nbu_client import (
     SEARCH_PATH,
     USER_AGENT,
 )
+from collector.countries.ua.load_cards import load_cards
 from collector.countries.ua.load_prices import load_prices
 from collector.countries.ua.load_series import load_series
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
@@ -426,6 +429,19 @@ class ParserUkraine:
 
     def load_series(self, dsn: str | None = None):
         return load_series(dsn=dsn)
+
+    def load_cards(self, dsn: str | None = None):
+        """One series' coins into catalog_items, with their photos and
+        source links. Requires the series to be in db_map.json (run
+        load-series first) and its media/out to be mirrored into the
+        bucket already -- see the module docstring for the full order."""
+        if self.series is None or self.staging is None:
+            raise RuntimeError(
+                "load_cards() requires a series name (pass series=... to ParserUkraine)"
+            )
+        return load_cards(
+            series_slug=self.staging.slug, dsn=dsn, staging_root=self.staging_root
+        )
 
     def load_prices(self, dsn: str | None = None):
         """Price history for one series if this parser has one, otherwise
