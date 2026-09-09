@@ -23,7 +23,7 @@ from selectolax.parser import HTMLParser
 
 from collector.core.pacing import Pacer
 from collector.countries.ua.nbu_client import USER_AGENT
-from collector.countries.ua.normalize import normalize_match
+from collector.countries.ua.normalize import normalize_match, split_packaging
 from collector.countries.ua.parsing import _parse_float
 
 BASE_URL = "https://www.ua-coins.info"
@@ -179,10 +179,25 @@ def parse_year(html: str, year: int) -> list[UaCoinsRow]:
 def _titles_match(a: str, b: str) -> bool:
     """a, b are already normalize_match()-ed. Equal, or one is the other
     plus a trailing clarification ("Назва уточнення") -- ua-coins
-    sometimes adds detail NBU's own title doesn't have."""
-    if a == b:
+    sometimes adds detail NBU's own title doesn't have.
+
+    A packaging tail is the one exception to that leniency: "Захисниці"
+    (ua-coins 2449) and "Захисниці у сувенірній упаковці" (2441) are two
+    different catalog entries at the same year and denomination, so
+    reading the tail as a clarification made BOTH of them candidates for
+    either NBU card and turned every such pair into a conflict. Both
+    sides must therefore carry the same packaging -- compared by
+    split_packaging's key, which is blind to the "упаковці"/"пакованні"
+    spelling drift, so a card NBU spells one way still matches a
+    ua-coins row spelling it the other.
+    """
+    a_base, _, a_packaging = split_packaging(a)
+    b_base, _, b_packaging = split_packaging(b)
+    if a_packaging != b_packaging:
+        return False
+    if a_base == b_base:
         return True
-    return a.startswith(b + " ") or b.startswith(a + " ")
+    return a_base.startswith(b_base + " ") or b_base.startswith(a_base + " ")
 
 
 def _find_candidates(rows: list[UaCoinsRow], title_key: str, denom: float) -> list[UaCoinsRow]:

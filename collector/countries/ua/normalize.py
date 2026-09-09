@@ -125,23 +125,79 @@ def fix_stray_apostrophe(s: str) -> str:
     return "".join(chars)
 
 
+# Both NBU and ua-coins mark the separately-catalogued packaged variant
+# of a coin by appending a packaging phrase to the coin's own title --
+# that tail is the ONLY thing telling "Захисниці" apart from "Захисниці
+# у сувенірній упаковці", which are two different catalog entries with
+# the same year and denomination. Both sites drift between "упаковці"
+# and "пакованні" for the same packaging (NBU's nbu:1718 says
+# "пакованні" where its neighbours in the same series say "упаковці"),
+# so the noun is folded away and the adjective ("сувенірн-" /
+# "подарунков-") is what identifies WHICH packaging it is.
+#
+# Cases and caskets ("у футлярі", "у дерев`яному футлярі") are
+# deliberately not part of this family: nothing observed so far
+# distinguishes two catalog entries by a футляр tail alone, and the tail
+# is part of the item's real name there ("Набір із двох срібних монет
+# ... у футлярі" is a set, not a packaged single coin).
+_PACKAGING_RE = re.compile(
+    r"\s+у\s+(сувенірн|подарунков)\w*\s+(?:упаковці|пакованні)\s*$",
+    re.IGNORECASE,
+)
+
+
+def split_packaging(s: str) -> tuple[str, str | None, str | None]:
+    """Split a trailing packaging phrase off a title.
+
+    Returns (base, tail, key): the title without the tail, the tail
+    verbatim (so a caller can re-attach it for display) or None, and the
+    canonical packaging key -- the lowercased adjective stem, which
+    compares equal across the "упаковці"/"пакованні" spelling drift --
+    or None when there is no packaging tail.
+    """
+    match = _PACKAGING_RE.search(s)
+    if match is None:
+        return s, None, None
+    return s[: match.start()].rstrip(), match.group(0).strip(), match.group(1).lower()
+
+
 def normalize_title(s: str) -> tuple[str, str | None]:
     """Strip wrapping quotes and a trailing metal-suffix "(н|с|з)".
 
     Returns (clean_title, metal_suffix) where metal_suffix is the
     canonical Cyrillic letter (н/с/з) or None if there wasn't one.
+
+    A packaging tail (see split_packaging) is peeled off first and
+    re-attached at the end, so the quote-stripping and metal-suffix rules
+    still see the coin's own name at the string's edge when NBU appends
+    one. That is what nbu:1718's title needs -- NBU writes it as
+    `"Країна супергероїв. Дякуємо зброярам!" (н) у сувенірному
+    пакованні`, where both the closing quote and the suffix sit
+    mid-string. The two tails come in either order, so they are peeled in
+    whatever order they appear, once each.
     """
     text = s.strip()
 
     suffix = None
-    match = _METAL_SUFFIX_RE.search(text)
-    if match:
-        raw_letter = match.group(1)
-        suffix = _SUFFIX_CANON.get(raw_letter, raw_letter)
-        text = text[: match.start()].rstrip()
+    packaging_tail = None
+    while True:
+        match = _METAL_SUFFIX_RE.search(text)
+        if match and suffix is None:
+            raw_letter = match.group(1)
+            suffix = _SUFFIX_CANON.get(raw_letter, raw_letter)
+            text = text[: match.start()].rstrip()
+            continue
+        base, tail, _ = split_packaging(text)
+        if tail is not None and packaging_tail is None:
+            packaging_tail = tail
+            text = base
+            continue
+        break
 
     text = strip_quotes(text)
     text = fix_stray_apostrophe(text)
+    if packaging_tail:
+        text = f"{text} {packaging_tail}"
     text = re.sub(r"\s+", " ", text).strip()
 
     return text, suffix
@@ -156,15 +212,28 @@ def normalize_title(s: str) -> tuple[str, str | None]:
 _APOSTROPHE_CHARS = "'`’ʼ"
 _APOSTROPHE_CANON = "’"
 
+# Quote marks are noise for comparison: NBU quotes the coin's own name in
+# some titles and not in others, and ua-coins copies whichever form NBU
+# used at the time -- ua-coins row 2659 keeps NBU's straight quotes in
+# `"Країна супергероїв. Дякуємо зброярам!" у сувенірному пакованні`,
+# while our own parsed title has them stripped. Dropped from both sides
+# here rather than "fixed" on either. Only the unambiguous quote marks:
+# the apostrophe look-alikes above stay, folded, because there they carry
+# a letter's worth of meaning ("Пам’ятки").
+_MATCH_DROP_CHARS = '«»"“”'
+
 
 def normalize_match(s: str) -> str:
-    """Normalize a string (series name) for equality comparison only --
-    NOT for display. Applies fix_homoglyphs, folds every apostrophe
-    look-alike to one canonical character, and collapses whitespace.
-    Two strings that differ only in which apostrophe character or which
-    script a look-alike letter is in compare equal after this.
+    """Normalize a string (series name, coin title) for equality
+    comparison only -- NOT for display. Applies fix_homoglyphs, folds
+    every apostrophe look-alike to one canonical character, drops quote
+    marks, and collapses whitespace. Two strings that differ only in
+    which apostrophe character, which script a look-alike letter is in,
+    or whether a name is quoted compare equal after this.
     """
     text = fix_homoglyphs(s)
     for ch in _APOSTROPHE_CHARS:
         text = text.replace(ch, _APOSTROPHE_CANON)
+    for ch in _MATCH_DROP_CHARS:
+        text = text.replace(ch, "")
     return re.sub(r"\s+", " ", text).strip()

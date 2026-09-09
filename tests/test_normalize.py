@@ -3,6 +3,7 @@ from collector.countries.ua.normalize import (
     fix_stray_apostrophe,
     normalize_match,
     normalize_title,
+    split_packaging,
     strip_quotes,
 )
 
@@ -126,3 +127,72 @@ def test_normalize_match_applies_homoglyph_fix():
     # "Знаки зодіаку" -- a real series name.
     raw = "Знаки зод" + chr(0x69) + "аку"
     assert normalize_match(raw) == normalize_match("Знаки зодіаку")
+
+
+# ---------------------------------------------------------------------- #
+# packaging tail
+# ---------------------------------------------------------------------- #
+
+
+def test_split_packaging_folds_the_upakovtsi_pakovanni_spelling():
+    # Both sites use the two spellings interchangeably for the same
+    # packaging, so the key must not distinguish them.
+    _, tail_a, key_a = split_packaging("Захисниці у сувенірній упаковці")
+    _, tail_b, key_b = split_packaging("Захисниці у сувенірному пакованні")
+    assert tail_a == "у сувенірній упаковці"
+    assert tail_b == "у сувенірному пакованні"
+    assert key_a == key_b == "сувенірн"
+
+
+def test_split_packaging_keeps_the_base_title():
+    base, _, _ = split_packaging("В єдності - сила у сувенірній упаковці")
+    assert base == "В єдності - сила"
+
+
+def test_split_packaging_no_tail():
+    assert split_packaging("Захисниці") == ("Захисниці", None, None)
+
+
+def test_split_packaging_distinguishes_gift_from_souvenir_packaging():
+    _, _, key = split_packaging("Назва у подарунковому пакованні")
+    assert key == "подарунков"
+
+
+def test_split_packaging_leaves_a_futlyar_alone():
+    # "у футлярі" is part of the item's real name (a set in a case), not a
+    # packaged-variant marker -- see the comment on _PACKAGING_RE.
+    title = "Набір із двох срібних монет у футлярі"
+    assert split_packaging(title) == (title, None, None)
+
+
+def test_normalize_title_quoted_name_with_suffix_before_packaging_tail():
+    # nbu:1718 exactly as NBU writes it: quotes wrap only the coin's own
+    # name, and the metal suffix sits between the closing quote and the
+    # packaging tail -- so neither the quote pair nor the suffix is at the
+    # string's edge.
+    clean, suffix = normalize_title(
+        '"Країна супергероїв. Дякуємо зброярам!" (н) у сувенірному пакованні'
+    )
+    assert clean == "Країна супергероїв. Дякуємо зброярам! у сувенірному пакованні"
+    assert suffix == "н"
+
+
+def test_normalize_title_suffix_after_the_packaging_tail():
+    # The two tails come in either order; both must be peeled.
+    clean, suffix = normalize_title('«Захисниці» у сувенірній упаковці (с)')
+    assert clean == "Захисниці у сувенірній упаковці"
+    assert suffix == "с"
+
+
+def test_normalize_match_drops_quote_marks():
+    # ua-coins row 2659 keeps NBU's straight quotes; our parsed title has
+    # them stripped. The two must still compare equal.
+    ua_coins = '"Країна супергероїв. Дякуємо зброярам!" у сувенірному пакованні'
+    ours = "Країна супергероїв. Дякуємо зброярам! у сувенірному пакованні"
+    assert normalize_match(ua_coins) == normalize_match(ours)
+
+
+def test_normalize_match_keeps_apostrophes():
+    # Quote marks are noise, but an apostrophe carries a letter's worth of
+    # meaning -- it is folded to one character, not dropped.
+    assert normalize_match("Пам’ятки") != normalize_match("Памятки")

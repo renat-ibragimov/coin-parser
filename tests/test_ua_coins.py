@@ -273,3 +273,79 @@ def test_match_cards_quality_disambiguation_no_unique_hint_stays_conflict():
     cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
     assert cards[0]["ua_coins"] is None
     assert unmatched[0]["reason"].startswith("conflict")
+
+
+def test_match_cards_packaged_variant_does_not_conflict_with_the_plain_coin():
+    # Real shape from the "Безсмертна моя Україно" run: ua-coins lists the
+    # 5 UAH Захисниці twice for 2023 -- plain (2449) and у сувенірній
+    # упаковці (2441). Reading the tail as a clarification made both rows
+    # candidates for either card, so every such pair came out CONFLICT.
+    cards = [
+        _card("nbu:1591", "Захисниці у сувенірній упаковці", 2023, 5),
+        _card("nbu:9999", "Захисниці", 2023, 5),
+    ]
+    rows_by_year = {
+        2023: [
+            _row(2449, "Захисниці", 2023, 5.0),
+            _row(2441, "Захисниці у сувенірній упаковці", 2023, 5.0),
+        ]
+    }
+    cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 2441
+    assert cards[1]["ua_coins"]["id"] == 2449
+
+
+def test_match_cards_packaging_matches_across_the_spelling_drift():
+    # NBU says "пакованні" for nbu:1718 where ua-coins row 2659 says the
+    # same thing -- but a card spelled the other way must still match.
+    cards = [_card("nbu:1718", "Назва у сувенірній упаковці", 2026, 5)]
+    rows_by_year = {
+        2026: [
+            _row(2659, "Назва у сувенірному пакованні", 2026, 5.0),
+            _row(2660, "Назва", 2026, 5.0),
+        ]
+    }
+    cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 2659
+
+
+def test_match_cards_packaged_card_does_not_fall_back_to_the_plain_row():
+    # Only the plain row exists on ua-coins -- reporting it unmatched is
+    # correct, silently pointing a packaged card at the plain page is not.
+    cards = [_card("nbu:1591", "Захисниці у сувенірній упаковці", 2023, 5)]
+    rows_by_year = {2023: [_row(2449, "Захисниці", 2023, 5.0)]}
+    cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
+    assert cards[0]["ua_coins"] is None
+    assert len(unmatched) == 1
+    assert "no candidate" in unmatched[0]["reason"]
+
+
+def test_match_cards_still_allows_a_trailing_clarification():
+    # The packaging rule must not kill the clarification leniency it is
+    # carved out of.
+    cards = [_card("nbu:1", "Херсонес Таврійський", 2003, 100)]
+    rows_by_year = {2003: [_row(1849, "Херсонес Таврійський уточнення", 2003, 100.0)]}
+    cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 1849
+
+
+def test_match_cards_matches_a_quoted_ua_coins_title():
+    # ua-coins 2659 copies NBU's straight quotes around the coin's name;
+    # our parsed title has them stripped.
+    cards = [_card("nbu:1718", "Країна супергероїв. Дякуємо зброярам! у сувенірному пакованні", 2026, 5)]
+    rows_by_year = {
+        2026: [
+            _row(
+                2659,
+                '"Країна супергероїв. Дякуємо зброярам!" у сувенірному пакованні',
+                2026,
+                5.0,
+            )
+        ]
+    }
+    cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 2659
