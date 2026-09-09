@@ -1,4 +1,5 @@
-# Nightly ua-coins quote for every NBU coin in the catalog.
+# Nightly ua-coins quote for the coins of the finished series
+# (db_map.json's "completed" list -- NOT the whole NBU catalog).
 #
 # Install (as the deploy user, on the server):
 #     mkdir -p ~/logs     # cron opens the log BEFORE the script runs,
@@ -6,6 +7,8 @@
 #     docker compose --env-file ~/coinkeeper/.env \
 #         -f ~/coin-parser/deploy/docker-compose.collector.yml build
 #     crontab ~/coin-parser/deploy/crontab
+#
+# Times are the SERVER's local time, not UTC.
 #     crontab -l          # check it took
 #
 # 03:15 is chosen away from the top of the hour on purpose: ua-coins
