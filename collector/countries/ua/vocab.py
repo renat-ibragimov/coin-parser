@@ -38,7 +38,11 @@ MATERIALS: dict[str, list[str]] = {
     # and 5 of the other). Folding them together would be exactly the
     # guess this module exists to refuse.
     "cupronickel": ["мельхіор"],
-    "bimetallic": ["біметал"],
+    # NBU spells this out in full on some series ("Відродження
+    # української державності", nbu:236) instead of the short "біметал"
+    # seen elsewhere -- same material, "made of base metals" being the
+    # only bimetallic option NBU uses (never precious-metal bimetallic).
+    "bimetallic": ["біметал", "біметалеві із недорогоцінних металів"],
 }
 
 QUALITY: dict[str, list[str]] = {
