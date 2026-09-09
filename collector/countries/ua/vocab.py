@@ -43,6 +43,12 @@ MATERIALS: dict[str, list[str]] = {
 
 QUALITY: dict[str, list[str]] = {
     "proof": ["пруф"],
+    # Not a spelling of "пруф": a proof-like strike is polished dies
+    # without the full proof treatment, and NBU grades both in the same
+    # series ("Видатні особистості України": 26 пруф against 5
+    # пруф-лайк, on different coins). Merging them would upgrade five
+    # coins to a quality their issuer never claimed.
+    "proof_like": ["пруф-лайк"],
     "uncirculated": ["звичайна", "анциркулейтед"],
     "special_uncirculated": ["спеціальний анциркулейтед"],
 }

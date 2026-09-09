@@ -72,3 +72,13 @@ def test_cupronickel_is_a_base_metal_for_the_loader():
     from collector.countries.ua.load_cards import metal_kind_of
 
     assert metal_kind_of("cupronickel") == "base"
+
+
+def test_proof_like_is_its_own_quality():
+    # Real anomaly from "Видатні особистості України": NBU grades 26
+    # coins "пруф" and 5 "пруф-лайк" in that one series, so they are
+    # different tiers. Merging them would claim a quality the issuer
+    # never gave those five coins.
+    assert vocab.lookup(vocab.QUALITY, "пруф") == "proof"
+    assert vocab.lookup(vocab.QUALITY, "пруф-лайк") == "proof_like"
+    assert vocab.lookup(vocab.QUALITY, "пруф-лайк") != vocab.lookup(vocab.QUALITY, "пруф")
