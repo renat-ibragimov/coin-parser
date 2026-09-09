@@ -52,17 +52,27 @@ def staging_dir(staging_root: Path) -> Path:
 
 
 def get_with_retry(
-    client: httpx.Client, path: str, pacer: Pacer, *, log_label: str = ""
+    client: httpx.Client,
+    path: str,
+    pacer: Pacer,
+    *,
+    log_label: str = "",
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     """GET `path` off ua-coins.info, paced, with 429 backoff-retry
     (respecting a Retry-After header if the server sends one). Shared by
     every ua-coins.info caller in this adapter (catalog pages, coin
-    detail pages, image downloads) -- one rate-limit policy for the one
-    host, so nothing accidentally paces or retries differently.
+    detail pages, image downloads, the signed price-chart endpoint) --
+    one rate-limit policy for the one host, so nothing accidentally
+    paces or retries differently.
+
+    `headers` are merged over the client's own for this one request; the
+    price-chart endpoint needs a Referer naming the coin page whose
+    render minted its signature (see prices.py).
     """
     for attempt in range(1, MAX_429_RETRIES + 1):
         pacer.wait()
-        resp = client.get(path)
+        resp = client.get(path, headers=headers)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After")
             delay = (

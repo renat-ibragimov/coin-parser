@@ -4,6 +4,8 @@ Three independent steps:
   fetch()          -- network -> staging/ua/<slug>/raw/*.html
   parse()          -- staging/ua/<slug>/raw/*.html -> staging/ua/<slug>/parsed/cards.json (no network)
   collect_series()  -- network -> countries/ua/series.json (committed, not staging)
+  fetch_prices()   -- network -> staging/ua/_ua_coins/prices/*.json (shared, not per-series)
+  load_prices()    -- staging/ua/_ua_coins/prices -> coin_keeper's market_price_snapshots
 
 fetch()/parse() require a known series (see countries/ua/series.json,
 built by collect_series()); collect_series() operates on the whole
@@ -33,9 +35,11 @@ from collector.countries.ua.nbu_client import (
     SEARCH_PATH,
     USER_AGENT,
 )
+from collector.countries.ua.load_prices import load_prices
 from collector.countries.ua.load_series import load_series
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
 from collector.countries.ua.photos import fetch_photos, process_photos
+from collector.countries.ua.prices import fetch_prices
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
 
 META_FILENAME = "_meta.json"
@@ -423,6 +427,16 @@ class ParserUkraine:
     def load_series(self, dsn: str | None = None):
         return load_series(dsn=dsn)
 
+    def load_prices(self, dsn: str | None = None):
+        """Price history for one series if this parser has one, otherwise
+        for every series staged on disk. The price cache is shared, so
+        both are meaningful -- see load_prices.build_card_index."""
+        return load_prices(
+            series_slug=self.staging.slug if self.staging is not None else None,
+            dsn=dsn,
+            staging_root=self.staging_root,
+        )
+
     # ------------------------------------------------------------------ #
     # ua-coins.info matching
     # ------------------------------------------------------------------ #
@@ -532,6 +546,20 @@ class ParserUkraine:
             raise RuntimeError(f"no parsed cards for {self.series!r} — run --step parse first")
         cards = self.staging.read_parsed().get("cards", [])
         return fetch_photos(cards, self.staging.dir, series=self.series, refresh=refresh)
+
+    # ------------------------------------------------------------------ #
+    # ua-coins price history
+    # ------------------------------------------------------------------ #
+
+    def fetch_prices(self, refresh: bool = False):
+        if self.series is None or self.staging is None:
+            raise RuntimeError(
+                "fetch_prices() requires a series name (pass series=... to ParserUkraine)"
+            )
+        if not self.staging.cards_json_path.exists():
+            raise RuntimeError(f"no parsed cards for {self.series!r} — run --step parse first")
+        cards = self.staging.read_parsed().get("cards", [])
+        return fetch_prices(cards, self.staging_root, series=self.series, refresh=refresh)
 
     def process_photos(self):
         if self.series is None or self.staging is None:
