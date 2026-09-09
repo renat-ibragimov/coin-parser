@@ -44,3 +44,31 @@ def test_edge_singular_and_plural_variants_same_code():
     # the singular "написом" -- both belong under plain_incuse_lettering.
     assert vocab.lookup(vocab.EDGE, "гладкий із заглибленим написом") == "plain_incuse_lettering"
     assert vocab.lookup(vocab.EDGE, "гладкий із заглибленими написами") == "plain_incuse_lettering"
+
+
+def test_karbovanets_is_spelled_both_ways_by_nbu():
+    # Real anomaly from series "Видатні особистості України": seven cards
+    # priced in "карб" where the dictionary only knew "крб". Same
+    # currency, so it is a variant of the existing code, not a new one.
+    assert vocab.lookup(vocab.UNIT, "крб") == "karbovanets"
+    assert vocab.lookup(vocab.UNIT, "карб") == "karbovanets"
+    assert vocab.lookup(vocab.UNIT, "карб.") == "karbovanets"
+
+
+def test_cupronickel_is_not_nickel_silver():
+    # Same series, five cards of "мельхіор". It is copper-nickel;
+    # "нейзильбер" is copper-nickel-zinc, and NBU uses both words in that
+    # one series for different coins -- so they are different codes.
+    assert vocab.lookup(vocab.MATERIALS, "мельхіор") == "cupronickel"
+    assert vocab.lookup(vocab.MATERIALS, "нейзильбер") == "nickel_silver"
+    assert vocab.lookup(vocab.MATERIALS, "мельхіор") != vocab.lookup(
+        vocab.MATERIALS, "нейзильбер"
+    )
+
+
+def test_cupronickel_is_a_base_metal_for_the_loader():
+    # metal_kind is an enum in coin_keeper (precious/base/unknown), so a
+    # new material must land on one of those without a migration.
+    from collector.countries.ua.load_cards import metal_kind_of
+
+    assert metal_kind_of("cupronickel") == "base"

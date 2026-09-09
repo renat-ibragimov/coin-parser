@@ -31,6 +31,13 @@ MATERIALS: dict[str, list[str]] = {
     "gold": ["золото"],
     "silver": ["срібло"],
     "nickel_silver": ["нейзильбер"],
+    # Its own code, NOT a variant of nickel_silver, however close they
+    # look on a coin: мельхіор is copper-nickel, нейзильбер is
+    # copper-nickel-ZINC, and NBU uses both words as different materials
+    # in the same series ("Видатні особистості України" has 143 of one
+    # and 5 of the other). Folding them together would be exactly the
+    # guess this module exists to refuse.
+    "cupronickel": ["мельхіор"],
     "bimetallic": ["біметал"],
 }
 
@@ -52,7 +59,10 @@ EDGE: dict[str, list[str]] = {
 
 UNIT: dict[str, list[str]] = {
     "hryvnia": ["грн", "грн."],
-    "karbovanets": ["крб", "крб."],
+    # NBU abbreviates the karbovanets both ways in its own catalog --
+    # "крб" on some cards, "карб" on others, sometimes within one series.
+    # Same currency, same canonical code; the DB already knows it as UAK.
+    "karbovanets": ["крб", "крб.", "карб", "карб."],
 }
 
 

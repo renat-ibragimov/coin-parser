@@ -42,7 +42,11 @@ REPO = Path(__file__).resolve().parent.parent
 SERIES = REPO / "staging" / "ua" / "2000-littia-rizdva-khrystovoho"
 # A second series, kept only for nbu:482 -- the one card in the corpus whose
 # best source (1120px) falls between two output tiers.
-STRANDED = REPO / "staging" / "ua" / "antychni-pamiatky-ukrainy"
+# The slug NBU's own spelling produces -- with the grave accent in
+# "пам`ятки" transliterated. An earlier hand-typed series name gave
+# "antychni-pamiatky-ukrainy" instead, and when that stray directory
+# was cleaned up these cases silently began skipping rather than failing.
+STRANDED = REPO / "staging" / "ua" / "antychni-pam-iatky-ukrainy"
 ODD_SHAPES = REPO / "current_ref"
 
 # Every source photo of the series, obverse and reverse, NBU and ua-coins.
