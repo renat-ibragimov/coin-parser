@@ -466,7 +466,12 @@ def build_item_values(
     title_en = titles.get("en")
     if title_en:
         values["title_en"] = title_en
-        values["title_en_source"] = "official"
+        # "official" unless the card itself says otherwise -- normal
+        # parse() output never sets this key, only a series with no NBU
+        # English page at all gets a title_en filled in by hand/LLM after
+        # the fact (see vidrodzhennia-khrystyianskoi-dukhovnosti-v-ukraini),
+        # and that title_en_source travels with it in cards.json.
+        values["title_en_source"] = card.get("title_en_source", "official")
 
     if card.get("circulation_date"):
         values["issue_date"] = date.fromisoformat(card["circulation_date"])
