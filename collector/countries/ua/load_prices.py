@@ -360,7 +360,7 @@ def _drop_ucoin(conn: psycopg.Connection, item_ids: list[int]) -> dict[int, int]
     return dropped
 
 
-def _create_tmp_table(conn: psycopg.Connection) -> None:
+def create_tmp_table(conn: psycopg.Connection) -> None:
     conn.execute(
         f"""
         CREATE TEMP TABLE {TMP_TABLE} (
@@ -377,7 +377,7 @@ def _create_tmp_table(conn: psycopg.Connection) -> None:
     )
 
 
-def _copy_rows(conn: psycopg.Connection, rows: list[tuple]) -> None:
+def copy_rows(conn: psycopg.Connection, rows: list[tuple]) -> None:
     col_clause = ", ".join(COPY_COLUMNS)
     with conn.cursor() as cur:
         with cur.copy(f"COPY {TMP_TABLE} ({col_clause}) FROM STDIN") as copy:
@@ -389,7 +389,7 @@ def _copy_rows(conn: psycopg.Connection, rows: list[tuple]) -> None:
                 copy.write_row((*head, Jsonb(raw_payload)))
 
 
-def _insert_from_tmp(conn: psycopg.Connection, has_is_suspect: bool) -> dict[int, int]:
+def insert_from_tmp(conn: psycopg.Connection, has_is_suspect: bool) -> dict[int, int]:
     """Move the staged rows into the real table; returns
     {catalog_item_id: rows actually inserted}.
 
@@ -542,9 +542,9 @@ def _run_transaction(
         return
 
     print(f"[load-prices] COPY {len(all_rows)} row(s) into {TMP_TABLE}...")
-    _create_tmp_table(conn)
-    _copy_rows(conn, all_rows)
-    inserted_by_item = _insert_from_tmp(conn, has_is_suspect)
+    create_tmp_table(conn)
+    copy_rows(conn, all_rows)
+    inserted_by_item = insert_from_tmp(conn, has_is_suspect)
     print(f"[load-prices] inserted {sum(inserted_by_item.values())} new row(s)")
 
     for report, item_id in loadable:

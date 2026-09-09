@@ -6,15 +6,20 @@ year and the coin's face year can differ by one). Never matches by name
 similarity/fuzzy scoring; ambiguity (more than one candidate on either
 side) is reported as a conflict, not silently resolved.
 
-Prices, price history, and photos are explicitly out of scope here --
-this step only records the URL/id of the matching ua-coins.info page.
+Photos and price HISTORY are out of scope here: matching only records
+the URL/id of the coin's ua-coins.info page. The one price this module
+does read is the single current quote the yearly catalog table already
+carries in its "Вартість дд.мм.гггг" column -- the nightly update-prices
+step lives off it, and it comes from the very page the matcher fetches.
 """
 
 from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -24,7 +29,7 @@ from selectolax.parser import HTMLParser
 from collector.core.pacing import Pacer
 from collector.countries.ua.nbu_client import USER_AGENT
 from collector.countries.ua.normalize import normalize_match, split_packaging
-from collector.countries.ua.parsing import _parse_float
+from collector.countries.ua.parsing import _parse_float, to_decimal
 
 BASE_URL = "https://www.ua-coins.info"
 CATALOG_PATH = "/ua/catalog/all/{year}"
@@ -44,6 +49,18 @@ _ID_RE = re.compile(r"^(\d+)")
 
 def staging_dir(staging_root: Path) -> Path:
     return staging_root / "ua" / "_ua_coins" / "raw"
+
+
+def row_id_from_href(href: str) -> int | None:
+    """"/ua/list/1999-rizdvo-khrystove" -> 1999, the ua-coins id.
+
+    It looks like a year and is not one: ua-coins' ids run from 1 and its
+    early entries happen to land in the 1990s (see docs/01_findings.md).
+    The leading number of the slug is the id, full stop.
+    """
+    slug_part = href.rstrip("/").rsplit("/", 1)[-1]
+    m = _ID_RE.match(slug_part)
+    return int(m.group(1)) if m else None
 
 
 # ---------------------------------------------------------------------- #
@@ -155,11 +172,9 @@ def parse_year(html: str, year: int) -> list[UaCoinsRow]:
             continue
 
         href = (link.attributes.get("href") or "").strip()
-        slug_part = href.rstrip("/").rsplit("/", 1)[-1]
-        id_match = _ID_RE.match(slug_part)
-        if id_match is None:
+        row_id = row_id_from_href(href)
+        if row_id is None:
             continue
-        row_id = int(id_match.group(1))
 
         title = (link.attributes.get("title") or link.text()).strip()
 
@@ -179,6 +194,151 @@ def parse_year(html: str, year: int) -> list[UaCoinsRow]:
             )
         )
     return rows
+
+
+# ---------------------------------------------------------------------- #
+# the price column of the yearly table (pure, no network)
+# ---------------------------------------------------------------------- #
+
+# The same yearly page the matcher reads also carries ONE current price
+# per coin, in a column whose header names the day it was taken:
+# "Вартість 08.09.2026". That header is the only date this adapter will
+# put on such a quote. ua-coins recomputes the column on its own
+# schedule, so a run at 03:15 routinely sees yesterday's number -- and
+# stamping it with today's date would invent a price point that nobody
+# quoted. See update_prices.py, which is the whole reason this exists:
+# one cheap page per year against one signed request per coin.
+_QUOTE_DATE_RE = re.compile(r"Вартість\s+(\d{2})\.(\d{2})\.(\d{4})")
+_QUOTE_HEADER_PREFIX = "Вартість"
+# A price cell holds "7 568" plus an arrow span, or the site's own
+# "немає даних" for a coin it has no quote for.
+_QUOTE_NUMBER_RE = re.compile(r"\d[\d\s\u00a0\u202f.,]*")
+
+
+class YearTableAnomaly(ValueError):
+    """The year page has a coin table, but not in the shape prices are
+    read out of. Takes the WHOLE year out of a run rather than letting a
+    misread page write dated numbers into the production history."""
+
+
+@dataclass
+class UaCoinsQuote:
+    id: int
+    url: str
+    title: str
+    price: Decimal | None  # None == the row says "немає даних"
+    raw_text: str
+
+
+@dataclass
+class YearQuotes:
+    year: int
+    as_of: date | None  # None only when the year has no table at all
+    quotes: dict[int, UaCoinsQuote] = field(default_factory=dict)
+
+
+def _quote_cell(tr) -> object | None:
+    """The row's price cell. Located by class first and by the column
+    header echoed into data-title second, so a class rename costs the
+    prices only if the header wording changes too."""
+    cell = tr.css_first("td.ua-table-price-cell")
+    if cell is not None:
+        return cell
+    for td in tr.css("td"):
+        if (td.attributes.get("data-title") or "").strip().startswith(_QUOTE_HEADER_PREFIX):
+            return td
+    return None
+
+
+def parse_quote_date(table) -> date | None:
+    """The snapshot date out of the "Вартість дд.мм.гггг" column header.
+
+    Looked for in the header row's text and then in the data-title
+    attributes the site copies that same header into for its mobile
+    layout -- two spellings of one fact, so losing either does not lose
+    the date.
+    """
+    texts = [td.text() or "" for td in table.css("thead td")]
+    texts += [td.text() or "" for td in table.css("thead th")]
+    texts += [
+        (td.attributes.get("data-title") or "")
+        for td in table.css("td")
+        if (td.attributes.get("data-title") or "").strip().startswith(_QUOTE_HEADER_PREFIX)
+    ]
+    for text in texts:
+        m = _QUOTE_DATE_RE.search(text)
+        if m is None:
+            continue
+        try:
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            raise YearTableAnomaly(f"price column header has an impossible date: {text.strip()!r}")
+    return None
+
+
+def parse_price_cell(text: str) -> Decimal | None:
+    """The number in a price cell, or None when there is not one.
+
+    "немає даних" is not an error and not a zero: ua-coins simply has no
+    quote for that coin (nbu:88 has been in that state since 2024). It
+    reads as None here and the coin is skipped by the caller.
+    """
+    m = _QUOTE_NUMBER_RE.search(text)
+    if m is None:
+        return None
+    price = to_decimal(m.group().strip())
+    if price is None or price <= 0:
+        return None
+    return price
+
+
+def parse_year_quotes(html: str, year: int) -> YearQuotes:
+    """One year's catalog page -> {ua_coins id: its current quote}.
+
+    Keyed by the ua-coins id from the row's own href, never by title:
+    the id is already stored per coin (price_source_links' external_id),
+    so this side does no matching at all -- the fuzzy question was
+    settled once, at --step match, and is not reopened nightly.
+    """
+    tree = HTMLParser(html)
+    table = tree.css_first("table.coin-list")
+    if table is None:
+        # No table at all -- a year ua-coins does not have a page for
+        # (fetch_year caches those as an empty document). Not an anomaly.
+        return YearQuotes(year=year, as_of=None)
+
+    as_of = parse_quote_date(table)
+    if as_of is None:
+        raise YearTableAnomaly(
+            f"year {year}: no \"{_QUOTE_HEADER_PREFIX} дд.мм.гггг\" column header -- "
+            "without it there is no date to put on these prices"
+        )
+
+    quotes: dict[int, UaCoinsQuote] = {}
+    for tr in table.css("tr"):
+        name_cell = tr.css_first('td[data-title="Назва"]')
+        if name_cell is None:
+            continue  # header row or the "year" separator row
+        link = name_cell.css_first("a")
+        if link is None:
+            continue
+
+        href = (link.attributes.get("href") or "").strip()
+        row_id = row_id_from_href(href)
+        if row_id is None:
+            continue
+
+        cell = _quote_cell(tr)
+        raw_text = " ".join((cell.text() if cell is not None else "").split())
+        quotes[row_id] = UaCoinsQuote(
+            id=row_id,
+            url=urljoin(BASE_URL, href),
+            title=(link.attributes.get("title") or link.text()).strip(),
+            price=parse_price_cell(raw_text) if cell is not None else None,
+            raw_text=raw_text,
+        )
+
+    return YearQuotes(year=year, as_of=as_of, quotes=quotes)
 
 
 # ---------------------------------------------------------------------- #

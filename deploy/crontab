@@ -1,0 +1,12 @@
+# Nightly ua-coins quote for every NBU coin in the catalog.
+#
+# Install (as the deploy user, on the server):
+#     mkdir -p ~/logs     # cron opens the log BEFORE the script runs,
+#                         # so this one has to exist beforehand
+#     crontab ~/coin-parser/deploy/crontab
+#     crontab -l          # check it took
+#
+# 03:15 is chosen away from the top of the hour on purpose: ua-coins
+# recomputes its price column overnight and rate-limits hard, and every
+# scraper in the world fires at :00.
+15 3 * * * /home/deploy/coin-parser/deploy/run-update-prices.sh >> /home/deploy/logs/update-prices.log 2>&1

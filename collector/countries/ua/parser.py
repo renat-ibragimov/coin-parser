@@ -8,6 +8,8 @@ Three independent steps:
   load_cards()     -- staging/ua/<slug> -> coin_keeper's catalog_items + media_files
                       + price_source_links
   load_prices()    -- staging/ua/_ua_coins/prices -> coin_keeper's market_price_snapshots
+  update_prices()  -- network -> coin_keeper's market_price_snapshots, scope read
+                      from the database itself (the nightly cron step)
 
 fetch()/parse() require a known series (see countries/ua/series.json,
 built by collect_series()); collect_series() operates on the whole
@@ -44,6 +46,7 @@ from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, pa
 from collector.countries.ua.photos import fetch_photos, process_photos
 from collector.countries.ua.prices import fetch_prices
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
+from collector.countries.ua.update_prices import update_prices
 
 META_FILENAME = "_meta.json"
 
@@ -455,6 +458,16 @@ class ParserUkraine:
             dsn=dsn,
             staging_root=self.staging_root,
             drop_ucoin=drop_ucoin,
+        )
+
+    def update_prices(self, dsn: str | None = None, staging_root: Path | None = None):
+        """Tonight's ua-coins quote for every NBU coin already in the
+        catalog. Unattended (cron) -- takes its scope from the database
+        rather than from staging, and reports through an exit code
+        instead of asking anything. Series-agnostic by nature, so it
+        ignores self.series entirely."""
+        return update_prices(
+            dsn=dsn, staging_root=staging_root or self.staging_root
         )
 
     # ------------------------------------------------------------------ #

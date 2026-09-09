@@ -48,6 +48,7 @@ from selectolax.parser import HTMLParser
 from collector.core.pacing import Pacer
 from collector.countries.ua import ua_coins
 from collector.countries.ua.nbu_client import USER_AGENT
+from collector.countries.ua.parsing import to_decimal
 
 PRICES_PATH = "/coin/prices/{id}"
 
@@ -174,14 +175,6 @@ _DATE_DMY_RE = re.compile(r"\b(\d{2})[.\-/](\d{2})[.\-/](\d{4})\b")
 _DATE_ISO_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 
-def _to_decimal(raw: str) -> Decimal | None:
-    cleaned = raw.replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".")
-    try:
-        return Decimal(cleaned)
-    except InvalidOperation:
-        return None
-
-
 def _find_date(text: str) -> date | None:
     m = _DATE_ISO_RE.search(text)
     if m:
@@ -232,7 +225,7 @@ def _as_of(text: str, found_by: str) -> CurrentPrice | None:
     m = _AS_OF_RE.search(text)
     if m is None:
         return None
-    value = _to_decimal(m.group(2))
+    value = to_decimal(m.group(2))
     if value is None or value <= 0:
         return None
     return CurrentPrice(
@@ -259,7 +252,7 @@ def _scan_for_prices(page_html: str) -> list[CurrentPrice]:
         m = _PRICE_TEXT_RE.search(text)
         if m is None:
             continue
-        value = _to_decimal(m.group(1))
+        value = to_decimal(m.group(1))
         if value is None or value <= 0:
             continue
         when = _find_date(text)
@@ -345,7 +338,7 @@ def _coerce_price(value: object, index: int) -> Decimal:
     elif isinstance(value, str):
         # Not seen in the wild, but a server that starts quoting its
         # numbers should not cost us the whole history.
-        price = _to_decimal(value.strip())
+        price = to_decimal(value.strip())
         if price is None:
             raise PriceSeriesAnomaly(f"point {index}: price {value!r} does not parse as a number")
     else:

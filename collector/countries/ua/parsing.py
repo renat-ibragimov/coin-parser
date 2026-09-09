@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
 
 from selectolax.parser import HTMLParser
@@ -187,6 +188,22 @@ def _parse_int(s: str | None) -> int | None:
         return None
     digits = re.sub(r"[^\d]", "", s)
     return int(digits) if digits else None
+
+
+def to_decimal(raw: str) -> Decimal | None:
+    """"7 568" / "1\u00a0234,50" -> Decimal, or None if it is not a number.
+
+    Ukrainian sites group thousands with a space (plain, non-breaking or
+    narrow) and write the decimal separator as a comma; float() and
+    Decimal() choke on both. Shared by every reader of a price out of
+    ua-coins HTML or JSON -- one spelling of "what counts as a number"
+    for the whole adapter.
+    """
+    cleaned = raw.replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", ".")
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return None
 
 
 def _parse_float(s: str | None) -> float | None:

@@ -10,12 +10,22 @@
                                                 # see collector/countries/ua/load_cards.py
     python -m collector ua --step load-prices   # writes to coin_keeper's DB, needs DATABASE_URL
                                                 # --series narrows it to one series
+    python -m collector ua --step update-prices # nightly cron step: today's ua-coins quote
+                                                # for every nbu:* coin already in the DB.
+                                                # Scope comes from the DB, not from staging.
+                                                # Exits 0 ok / 1 partial / 2 nothing done.
 
 The four steps that write to production (load-series, load-cards,
 load-prices, plus the bucket mirror that has to happen between the last
 two) are not interchangeable and have preconditions. The full procedure
 -- server access, the ssh tunnel postgres needs, what to check after
 each step -- is docs/03_series_playbook.md.
+
+update-prices stands apart from all of them: it is the one step meant to
+run unattended, on the server, from deploy/crontab. It has no
+preconditions beyond a loaded catalog, prints one greppable summary line,
+and says everything else through its exit code -- see the "Суточные цены"
+section of the playbook.
 """
 
 from __future__ import annotations
@@ -36,7 +46,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Ukrainian series name, exact match (not needed for --step series/"
-            "load-series; optional for load-prices, which narrows to it when given)"
+            "load-series/update-prices; optional for load-prices, which narrows to it "
+            "when given)"
         ),
     )
     ua.add_argument(
@@ -53,13 +64,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "fetch-prices",
             "load-cards",
             "load-prices",
+            "update-prices",
         ],
         default="all",
         help=(
             "which step to run ('all' = fetch, parse, match, fetch-photos, process-photos "
-            "-- fetch-prices/load-cards/load-prices stay out of 'all' on purpose: one hits "
-            "the network hard, the other two write to production, and load-cards needs the "
-            "media mirrored into the bucket first)"
+            "-- fetch-prices/load-cards/load-prices/update-prices stay out of 'all' on "
+            "purpose: one hits the network hard, the others write to production, "
+            "load-cards needs the media mirrored into the bucket first, and update-prices "
+            "is the nightly cron step rather than part of collecting a series)"
         ),
     )
     ua.add_argument(
@@ -109,6 +122,12 @@ def main(argv: list[str] | None = None) -> int:
         summary = parser.load_series()
         return 1 if summary.error else 0
 
+    if args.step == "update-prices":
+        # The cron step. Nothing about it is per-series (its scope is the
+        # catalog itself), and its exit code is the whole report as far
+        # as cron is concerned: 0 fine, 1 some years lost, 2 nothing done.
+        return ParserUkraine().update_prices().exit_code
+
     if args.step == "load-prices":
         # Unlike the other per-series steps this one runs with or without
         # --series: the price cache is shared across series, so "load
@@ -119,7 +138,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.series:
         print(
-            "error: --series is required unless --step series/load-series/load-prices",
+            "error: --series is required unless --step "
+            "series/load-series/load-prices/update-prices",
             file=sys.stderr,
         )
         return 2
