@@ -2,7 +2,8 @@
   "comment": "slug из series.json -> coin_series.id прод-базы. Правится руками или INSERT'ом load-series.",
   "completed_comment": "Серии, доведённые до конца по docs/03_series_playbook.md: собраны, с фото, залиты в catalog_items и с историей цен. ТОЛЬКО их трогает ночной update-prices. Дописывать сюда руками, последним шагом заливки серии, — не раньше.",
   "completed": [
-    "2000-littia-rizdva-khrystovoho"
+    "2000-littia-rizdva-khrystovoho",
+    "antychni-pam-iatky-ukrainy"
   ],
   "series": {
     "2000-littia-rizdva-khrystovoho": 8,
