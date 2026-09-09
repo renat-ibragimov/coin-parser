@@ -1,0 +1,56 @@
+# The collector alongside coin_keeper, sharing its docker network.
+#
+# It joins coin_keeper's network as an EXTERNAL one rather than declaring
+# its own, which is the whole point: on that network postgres is reachable
+# as the host `postgres`, so nothing here has to look up a container IP
+# that docker reassigns on every recreate. Compare the old wrapper, which
+# did exactly that dance from the host.
+#
+# Nothing here is a long-running service -- every service is a one-shot
+# task started with `docker compose run --rm`.
+#
+#   docker compose --env-file ~/coinkeeper/.env \
+#     -f deploy/docker-compose.collector.yml run --rm update-prices
+#
+# --env-file points at coin_keeper's own .env so POSTGRES_USER and
+# POSTGRES_PASSWORD are the stack's, kept in one place, and never copied
+# into this repository.
+name: collector
+
+x-collector: &collector
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: coin-collector:latest
+  environment:
+    # The steps require DATABASE_URL non-empty, but libpq takes the rest
+    # from PG*, so the password is never part of a connection string,
+    # a log line or `ps` output.
+    DATABASE_URL: "postgresql:///${POSTGRES_DB:-coinkeeper}"
+    PGHOST: "${PGHOST:-postgres}"
+    PGPORT: "${PGPORT:-5432}"
+    PGUSER: "${POSTGRES_USER:-coinkeeper}"
+    PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing -- pass --env-file ~/coinkeeper/.env}"
+  volumes:
+    - staging:/app/staging
+  networks: [coinkeeper]
+  restart: "no"
+
+services:
+  update-prices:
+    <<: *collector
+    command: ["ua", "--step", "update-prices"]
+
+  # Anything else worth running against production from here, one-shot.
+  # `docker compose ... run --rm collector ua --step load-prices` also
+  # works; this service just spells the common case out.
+  collector:
+    <<: *collector
+
+networks:
+  coinkeeper:
+    external: true
+    name: "${COINKEEPER_NETWORK:-coinkeeper_default}"
+
+volumes:
+  staging:

@@ -2,16 +2,26 @@
 name = "coin-collector"
 version = "0.1.0"
 requires-python = ">=3.12"
+# Everything the collecting, matching and database steps need, and
+# nothing more. The image deployed on the server installs exactly this
+# and stops -- see deploy/Dockerfile.
 dependencies = [
     "httpx>=0.27",
     "selectolax>=0.3",
     "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+# The photo pipeline (fetch-photos/process-photos, and so --step all).
+# Split out because it is ~100 MB of wheels that only ever run on a
+# workstation: the nightly update-prices on the server has no business
+# building an image-processing stack to scrape one HTML table. Locally,
+# install with:  pip install -e ".[photos,dev]"
+photos = [
     "Pillow>=10.0",
     "opencv-python-headless>=4.9",
     "numpy>=1.26",
 ]
-
-[project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]

@@ -11,6 +11,19 @@
 
 ## 1. Что настроить один раз
 
+### Локальное окружение
+
+```
+pip install -e ".[photos,dev]"
+```
+
+Extra `photos` — это opencv, Pillow и numpy, то есть весь фотопайплайн
+(`fetch-photos`, `process-photos`, а значит и `--step all`). Без него
+поставятся только `httpx`, `selectolax` и `psycopg`, которых хватает
+шагам сбора и записи в БД. Разделено ради сервера: ночному
+`update-prices` незачем собирать стек обработки изображений, чтобы
+разобрать одну HTML-таблицу (раздел 8).
+
 ### Доступ к серверу
 
 Сервер — Hetzner, пользователь `deploy`, SSH на нестандартном порту.
@@ -301,12 +314,18 @@ staging на сервере не надо, и то, что там лежит (и
 
 ### Установка
 
+Шаг едет на сервер **контейнером рядом с coin_keeper**, а не вторым
+питоном на хосте. Так исчезает и venv, и `pip install` на сервере, и
+добывание IP контейнера postgres: контейнер стоит в той же docker-сети,
+где postgres зовут просто `postgres`.
+
 ```
 ssh coinkeeper
 git clone <repo> ~/coin-parser && cd ~/coin-parser   # или git pull, если уже есть
-python3 -m venv .venv && .venv/bin/pip install -e .
 mkdir -p ~/logs        # cron открывает лог ДО запуска скрипта, каталог должен быть
-crontab ~/coin-parser/deploy/crontab
+docker compose --env-file ~/coinkeeper/.env \
+    -f deploy/docker-compose.collector.yml build
+crontab deploy/crontab
 crontab -l             # проверить, что встало
 ```
 
@@ -316,11 +335,23 @@ crontab -l             # проверить, что встало
 ~/coin-parser/deploy/run-update-prices.sh; echo "exit=$?"
 ```
 
-Пароль в скрипте нигде не хранится: он читается из `~/coinkeeper/.env`,
-уезжает в `PGPASSWORD`, а `DATABASE_URL` остаётся `postgresql:///coinkeeper`
-— то же разделение, что в разделе 1. IP контейнера postgres скрипт берёт
-`docker inspect` **на момент запуска**: docker меняет его при пересоздании
-сети, и запомненный адрес — это отказ в первое же утро после передеплоя.
+Пароль никуда не копируется: `--env-file ~/coinkeeper/.env` отдаёт
+compose'у `POSTGRES_USER`/`POSTGRES_PASSWORD` самого стека, они уезжают в
+`PG*` контейнера, а `DATABASE_URL` остаётся `postgresql:///coinkeeper` —
+то же разделение, что в разделе 1.
+
+Если сеть стека называется не `coinkeeper_default` (проверить:
+`docker network ls`), имя задаётся переменной:
+`COINKEEPER_NETWORK=<имя> ~/coin-parser/deploy/run-update-prices.sh`.
+
+Скачанный за ночь HTML лежит в докер-томе `collector_staging`, а не в
+чекауте — том переживает пересборку образа, и именно его чистит сам шаг.
+Посмотреть: `docker run --rm -v collector_staging:/s alpine ls /s/ua/_ua_coins/daily`.
+
+Образ ставит только `httpx`, `selectolax` и `psycopg` — около 180 МБ.
+Фотопайплайн (opencv, Pillow, numpy) вынесен в extra `photos` и на
+сервер не едет вообще; локально ставится как
+`pip install -e ".[photos,dev]"`.
 
 ### Проверка назавтра
 

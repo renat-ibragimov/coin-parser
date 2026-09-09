@@ -3,6 +3,8 @@
 # Install (as the deploy user, on the server):
 #     mkdir -p ~/logs     # cron opens the log BEFORE the script runs,
 #                         # so this one has to exist beforehand
+#     docker compose --env-file ~/coinkeeper/.env \
+#         -f ~/coin-parser/deploy/docker-compose.collector.yml build
 #     crontab ~/coin-parser/deploy/crontab
 #     crontab -l          # check it took
 #

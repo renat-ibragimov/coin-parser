@@ -43,7 +43,6 @@ from collector.countries.ua.load_cards import load_cards
 from collector.countries.ua.load_prices import load_prices
 from collector.countries.ua.load_series import load_series
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
-from collector.countries.ua.photos import fetch_photos, process_photos
 from collector.countries.ua.prices import fetch_prices
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
 from collector.countries.ua.update_prices import update_prices
@@ -571,6 +570,15 @@ class ParserUkraine:
     # ------------------------------------------------------------------ #
 
     def fetch_photos(self, refresh: bool = False):
+        # Imported here, not at module level, and it is not a style
+        # choice: photos.py pulls in opencv, Pillow and numpy, and the
+        # steps that run unattended on the server (update-prices above
+        # all) have no business needing an image-processing stack to
+        # start. Keeping it lazy is what lets the deployed image install
+        # httpx/selectolax/psycopg and stop there -- see the "photos"
+        # extra in pyproject.toml.
+        from collector.countries.ua.photos import fetch_photos
+
         if self.series is None or self.staging is None:
             raise RuntimeError(
                 "fetch_photos() requires a series name (pass series=... to ParserUkraine)"
@@ -595,6 +603,8 @@ class ParserUkraine:
         return fetch_prices(cards, self.staging_root, series=self.series, refresh=refresh)
 
     def process_photos(self):
+        from collector.countries.ua.photos import process_photos  # see fetch_photos
+
         if self.series is None or self.staging is None:
             raise RuntimeError(
                 "process_photos() requires a series name (pass series=... to ParserUkraine)"
