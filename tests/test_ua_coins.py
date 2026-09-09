@@ -349,3 +349,70 @@ def test_match_cards_matches_a_quoted_ua_coins_title():
     cards, unmatched = match_cards(cards, rows_by_year, "2026-01-01T00:00:00+00:00")
     assert unmatched == []
     assert cards[0]["ua_coins"]["id"] == 2659
+
+
+def test_exact_title_beats_a_shorter_name_that_is_only_a_word_prefix():
+    """Real conflict from "Видатні особистості України" (nbu:369).
+
+    NBU's "Лев Ландау" drew two candidates at 2 UAH / 2008: ua-coins 196
+    "Лев Ландау", and ua-coins 1872 "Лев" -- a different coin entirely,
+    which the trailing-clarification leniency accepted because the
+    physicist's name starts with the word "Лев". The leniency is for
+    ua-coins adding detail NBU lacks, not for a shorter unrelated name.
+    """
+    html = _table_html(
+        _row_html("/ua/list/196-lev-landau", "Лев Ландау", "2 грн.")
+        + _row_html("/ua/list/1872-lev", "Лев", "2 грн.")
+    )
+    rows = parse_year(html, 2008)
+    cards = [{
+        "source_id": "nbu:369",
+        "titles": {"uk": "Лев Ландау"},
+        "year": 2008,
+        "denomination": {"value": 2.0},
+    }]
+
+    cards, unmatched = match_cards(cards, {2008: rows}, "t")
+
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 196
+
+
+def test_the_shorter_card_still_matches_its_own_shorter_row():
+    # The mirror image: the rule must not hand every coin to the longest
+    # title. A card actually called "Лев" takes ua-coins 1872.
+    html = _table_html(
+        _row_html("/ua/list/196-lev-landau", "Лев Ландау", "2 грн.")
+        + _row_html("/ua/list/1872-lev", "Лев", "2 грн.")
+    )
+    cards = [{
+        "source_id": "nbu:999",
+        "titles": {"uk": "Лев"},
+        "year": 2008,
+        "denomination": {"value": 2.0},
+    }]
+
+    cards, unmatched = match_cards(cards, {2008: parse_year(html, 2008)}, "t")
+
+    assert unmatched == []
+    assert cards[0]["ua_coins"]["id"] == 1872
+
+
+def test_two_equally_exact_candidates_are_still_a_conflict():
+    # Narrowing only: with no single exact match the step reports a
+    # conflict instead of preferring one.
+    html = _table_html(
+        _row_html("/ua/list/11-dvijnyk", "Двійник", "2 грн.")
+        + _row_html("/ua/list/12-dvijnyk", "Двійник", "2 грн.")
+    )
+    cards = [{
+        "source_id": "nbu:1",
+        "titles": {"uk": "Двійник"},
+        "year": 2008,
+        "denomination": {"value": 2.0},
+    }]
+
+    cards, unmatched = match_cards(cards, {2008: parse_year(html, 2008)}, "t")
+
+    assert cards[0]["ua_coins"] is None
+    assert unmatched[0]["reason"].startswith("conflict")

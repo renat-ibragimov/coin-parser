@@ -374,6 +374,26 @@ def _find_candidates(rows: list[UaCoinsRow], title_key: str, denom: float) -> li
     return [r for r in rows if r.denomination == denom and _titles_match(title_key, r.title_key)]
 
 
+def _prefer_exact_title(candidates: list[UaCoinsRow], title_key: str) -> list[UaCoinsRow]:
+    """When several candidates survive, an EXACTLY equal title beats one
+    that only matched by the trailing-clarification leniency.
+
+    Real case: NBU's "Лев Ландау" (2 UAH, 2008) drew two candidates --
+    ua-coins 196 "Лев Ландау" and ua-coins 1872 "Лев", a different coin
+    of the same year and denomination that happens to be a word-prefix
+    of the physicist's name. The leniency exists because ua-coins
+    sometimes appends detail NBU's own title lacks; it was never meant to
+    let a shorter, unrelated name compete with the real thing.
+
+    Deterministic and narrowing only: it never invents a candidate, and
+    it steps aside unless exactly one is an exact match, so a genuine
+    ambiguity is still reported as a conflict rather than resolved by
+    preference.
+    """
+    exact = [c for c in candidates if c.title_key == title_key]
+    return exact if len(exact) == 1 else candidates
+
+
 # ua-coins sometimes lists the same coin twice under one title with a
 # trailing "(quality)" clarification distinguishing two real, different
 # catalog entries -- e.g. "100 років Київському політехнічному
@@ -435,6 +455,8 @@ def match_cards(
 
         exact = _find_candidates(rows_by_year.get(year, []), title_key, denom)
         if len(exact) > 1:
+            exact = _prefer_exact_title(exact, title_key)
+        if len(exact) > 1:
             exact = _disambiguate_by_quality(exact, quality_raw)
         if len(exact) == 1:
             per_card[source_id] = {"status": "match", "matched_by": "exact", "row": exact[0], "year_used": year}
@@ -446,6 +468,8 @@ def match_cards(
         shifted: list[UaCoinsRow] = []
         for y in (year - 1, year + 1):
             shifted.extend(_find_candidates(rows_by_year.get(y, []), title_key, denom))
+        if len(shifted) > 1:
+            shifted = _prefer_exact_title(shifted, title_key)
         if len(shifted) > 1:
             shifted = _disambiguate_by_quality(shifted, quality_raw)
         if len(shifted) == 1:
