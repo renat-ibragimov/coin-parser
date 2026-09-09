@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 
 from collector.countries.ua.photos import (
     LOW_RES_THRESHOLD,
+    _assign_roles,
     _fetch_nbu_candidates,
     OUTPUT_SIZES,
     PAIR_SILHOUETTE_MIN,
@@ -443,3 +444,141 @@ def test_the_full_size_filename_carries_its_role(tmp_path):
     # keep saying which side it is.
     assert _role_from_text("nbu_big_obverse.png") == "obverse"
     assert _role_from_text("nbu_big_reverse.png") == "reverse"
+
+
+# ---------------------------------------------------------------------- #
+# _assign_roles -- the caption is a label, not proof
+# ---------------------------------------------------------------------- #
+
+
+def _cand(file, alt=None, is_coin=True, klass=1, solidity=0.99):
+    from collector.countries.ua.photos import FetchCandidate
+
+    verdict = coin_classifier.Verdict(
+        is_coin, 1, solidity, 0.78, 1.0, 0.9, 0.99, "ok" if is_coin else "boxy object in frame"
+    )
+    return _Processed(
+        candidate=FetchCandidate(file=file, url="", alt=alt, source="ua_coins", width=0, height=0, bytes=0),
+        img=Image.new("RGB", (1600, 1600)),
+        klass=klass,
+        bg_verdict=None,
+        coin_verdict=verdict,
+        truecolour=True,
+    )
+
+
+def _files(pool):
+    return [p.candidate.file for p in pool]
+
+
+def test_a_correct_caption_keeps_its_role():
+    pools, unassigned, _ = _assign_roles(
+        [
+            _cand("nbu_obverse.jpg"),
+            _cand("nbu_reverse.jpg"),
+            _cand("uacoins_03.webp", alt="... - додаткове фото"),
+        ]
+    )
+    assert _files(pools["obverse"]) == ["nbu_obverse.jpg"]
+    assert _files(pools["reverse"]) == ["nbu_reverse.jpg"]
+    assert _files(unassigned) == ["uacoins_03.webp"]
+
+
+def test_a_caption_on_packaging_loses_the_role_to_the_coin_underneath():
+    # nbu:1561's real shape: every "Аверс"/"Реверс" on the card is a scan
+    # of the blister, and the coin sides are unnamed "додаткове фото".
+    pools, unassigned, notes = _assign_roles(
+        [
+            _cand("nbu_obverse.jpg", is_coin=False, klass=3),
+            _cand("nbu_reverse.jpg", is_coin=False, klass=3),
+            _cand("uacoins_01.webp", alt="Аверс ... у сувенірній упаковці", is_coin=False, klass=3),
+            _cand("uacoins_02.webp", alt="Реверс ... у сувенірній упаковці", is_coin=False, klass=3),
+            _cand("uacoins_03.webp", alt="... - додаткове фото"),
+            _cand("uacoins_04.webp", alt="... - додаткове фото"),
+        ]
+    )
+    assert pools["obverse"][-1].candidate.file == "uacoins_03.webp"
+    assert pools["reverse"][-1].candidate.file == "uacoins_04.webp"
+    assert unassigned == []
+    assert any("shape overrides the caption" in n for n in notes)
+
+
+def test_the_overruled_captions_stay_in_the_pool_as_fallbacks():
+    # Nothing is ever removed from a pool -- the rescue is appended, and
+    # outranks the blister on background class anyway.
+    pools, _, _ = _assign_roles(
+        [
+            _cand("uacoins_01.webp", alt="Аверс ...", is_coin=False, klass=3),
+            _cand("uacoins_03.webp", alt="... - додаткове фото"),
+        ]
+    )
+    assert _files(pools["obverse"]) == ["uacoins_01.webp", "uacoins_03.webp"]
+    assert sorted(pools["obverse"], key=_rank_key)[0].candidate.file == "uacoins_03.webp"
+
+
+def test_a_rejected_caption_keeps_its_role_when_nothing_better_is_offered():
+    # Not a gate: a photo the classifier dislikes still ships when it is
+    # all the card has (the nbu:161 contract).
+    pools, _, notes = _assign_roles(
+        [
+            _cand("nbu_obverse.jpg", is_coin=False, klass=3),
+            _cand("nbu_reverse.jpg", is_coin=False, klass=3),
+            _cand("uacoins_05.webp", alt="Буклет, сторінка 1", is_coin=False, klass=3),
+        ]
+    )
+    assert _files(pools["obverse"]) == ["nbu_obverse.jpg"]
+    assert _files(pools["reverse"]) == ["nbu_reverse.jpg"]
+    assert not any("shape overrides" in n for n in notes)
+
+
+def test_the_booklet_pages_are_not_mistaken_for_the_coin():
+    # nbu:1589 carries two extra gallery images the classifier rejects;
+    # only the two it accepts may take the roles.
+    pools, unassigned, _ = _assign_roles(
+        [
+            _cand("uacoins_01.webp", alt="Аверс ...", is_coin=False, klass=3),
+            _cand("uacoins_02.webp", alt="Реверс ...", is_coin=False, klass=3),
+            _cand("uacoins_03.webp", alt="... - додаткове фото"),
+            _cand("uacoins_04.webp", alt="... - додаткове фото"),
+            _cand("uacoins_05.webp", alt="Буклет, сторінка 1", is_coin=False, klass=3),
+            _cand("uacoins_06.webp", alt="Буклет, сторінка 2", is_coin=False, klass=3),
+        ]
+    )
+    assert pools["obverse"][-1].candidate.file == "uacoins_03.webp"
+    assert pools["reverse"][-1].candidate.file == "uacoins_04.webp"
+    assert _files(unassigned) == ["uacoins_05.webp", "uacoins_06.webp"]
+
+
+def test_the_rescued_pair_is_split_by_gallery_order_not_by_score():
+    # score() ranks how cleanly one object separates from its background
+    # and explicitly does not identify sides; on nbu:1561 the two sides
+    # differ by 0.003 and the reverse scored higher. Order decides.
+    obverse = _cand("uacoins_03.webp", alt="додаткове фото", solidity=0.980)
+    reverse = _cand("uacoins_04.webp", alt="додаткове фото", solidity=0.995)
+    assert coin_classifier.score(reverse.coin_verdict) > coin_classifier.score(obverse.coin_verdict)
+    pools, _, _ = _assign_roles(
+        [_cand("uacoins_01.webp", alt="Аверс ...", is_coin=False, klass=3), obverse, reverse]
+    )
+    assert pools["obverse"][-1].candidate.file == "uacoins_03.webp"
+    assert pools["reverse"][-1].candidate.file == "uacoins_04.webp"
+
+
+def test_an_unlabelled_card_still_falls_back_to_the_geometry_tiebreak():
+    # No caption anywhere and nothing the classifier accepts: the roles
+    # would go empty, so the best of a bad lot is taken -- by score here,
+    # since there is no accepted candidate to order.
+    pools, _, notes = _assign_roles(
+        [
+            _cand("uacoins_01.webp", is_coin=False, klass=3, solidity=0.50),
+            _cand("uacoins_02.webp", is_coin=False, klass=3, solidity=0.90),
+        ]
+    )
+    assert pools["obverse"][0].candidate.file == "uacoins_02.webp"
+    assert pools["reverse"][0].candidate.file == "uacoins_01.webp"
+    assert all("geometry tiebreak" in n for n in notes if "filled by" in n)
+
+
+def test_no_candidates_at_all_leaves_both_roles_empty():
+    pools, unassigned, _ = _assign_roles([])
+    assert pools == {"obverse": [], "reverse": []}
+    assert unassigned == []

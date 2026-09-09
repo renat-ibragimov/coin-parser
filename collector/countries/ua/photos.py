@@ -550,6 +550,81 @@ def _rank_key(p: _Processed) -> tuple[int, int, int, int, int]:
     )
 
 
+def _assign_roles(
+    processed: list[_Processed],
+) -> tuple[dict[str, list[_Processed]], list[_Processed], list[str]]:
+    """Sort candidates into an obverse and a reverse pool. Returns
+    (pools, what stayed unassigned, log lines).
+
+    The first pass reads the role off the filename or the caption. That
+    text is a label, not proof, and on the souvenir-packaged cards the
+    label is simply wrong: NBU photographs the blister rather than the
+    coin, and ua-coins captions those same scans "Аверс"/"Реверс" while
+    the actual coin sides sit further down the gallery as unnamed
+    "додаткове фото" (nbu:1561, 1565, 1589, 1591 -- every packaged card
+    in the series). So the second pass lets the shape classifier overrule
+    the text: a role whose every labelled candidate the classifier
+    rejects loses it to an unassigned photo the classifier accepts.
+
+    That cannot disturb a healthy card -- it fires only when the labelled
+    photos are ALL rejected AND something unlabelled is accepted -- and it
+    is not a gate: when nothing unassigned qualifies, the rejected label
+    keeps the role and still ships (the ranking-not-a-gate contract in
+    coin_classifier.py).
+    """
+    role_pools: dict[str, list[_Processed]] = {"obverse": [], "reverse": []}
+    unassigned: list[_Processed] = []
+    notes: list[str] = []
+
+    for p in processed:
+        role = _role_from_text(p.candidate.file) or _role_from_text(p.candidate.alt)
+        if role:
+            role_pools[role].append(p)
+        else:
+            unassigned.append(p)
+    if unassigned:
+        notes.append(f"unassigned by metadata: {[p.candidate.file for p in unassigned]}")
+
+    for role in ("obverse", "reverse"):
+        pool = role_pools[role]
+        if any(p.coin_verdict.is_coin for p in pool):
+            continue  # the label is backed by the shape -- leave it alone
+
+        # Gallery order, not score(): both sites publish the obverse before
+        # the reverse (the same convention NBU's own pair of thumbnails
+        # follows), whereas score() measures how cleanly one object
+        # separates from its background and says of itself that it never
+        # identifies a side. The two sides of one coin land within 0.003 of
+        # each other here, so ranking by it decided obverse-vs-reverse on
+        # noise -- and got nbu:1561 and nbu:1591 backwards.
+        accepted = [p for p in unassigned if p.coin_verdict.is_coin]
+        if accepted:
+            best, how = accepted[0], "shape overrides the caption"
+        elif pool:
+            continue  # nothing better on offer -- the label keeps the role
+        elif unassigned:
+            # No label at all and nothing the classifier accepts: the role
+            # would go empty, so take the best of a bad lot. Scored from
+            # the verdict computed earlier, not by re-classifying:
+            # classify() re-decodes the file from disk, and calling it from
+            # inside a sort key ran it O(n log n) times over work already
+            # done.
+            best = max(unassigned, key=lambda p: coin_classifier.score(p.coin_verdict))
+            how = "geometry tiebreak"
+        else:
+            continue
+
+        # Appended, not substituted: the rejected labelled photos stay in
+        # the pool as fallbacks. They rank below the rescue anyway -- the
+        # coin photos here are already transparent (class 1) and the
+        # blister scans are kept_bg (class 3).
+        role_pools[role].append(best)
+        unassigned.remove(best)
+        notes.append(f"{role}: filled by {how} -> {best.candidate.file}")
+
+    return role_pools, unassigned, notes
+
+
 def _process_role(
     role: str,
     pool: list[_Processed],
@@ -757,36 +832,9 @@ def process_photos(cards: list[dict], series_dir: Path, series: str = "") -> Pro
                 )
             )
 
-        role_pools: dict[str, list[_Processed]] = {"obverse": [], "reverse": []}
-        unassigned: list[_Processed] = []
-        for p in godny:
-            role = _role_from_text(p.candidate.file) or _role_from_text(p.candidate.alt)
-            if role:
-                role_pools[role].append(p)
-            else:
-                unassigned.append(p)
-        if unassigned:
-            print(
-                f"[process-photos]     unassigned by metadata: "
-                f"{[p.candidate.file for p in unassigned]}"
-            )
-
-        for role in ("obverse", "reverse"):
-            if role_pools[role]:
-                continue
-            # Scored from the verdict computed above, not by re-classifying:
-            # classify() re-decodes the file from disk, and calling it from
-            # inside a sort key ran it O(n log n) times over work already done.
-            eligible = sorted(
-                unassigned,
-                key=lambda p: coin_classifier.score(p.coin_verdict),
-                reverse=True,
-            )
-            if eligible:
-                best = eligible[0]
-                role_pools[role].append(best)
-                unassigned.remove(best)
-                print(f"[process-photos]     {role}: filled by geometry tiebreak -> {best.candidate.file}")
+        role_pools, unassigned, notes = _assign_roles(godny)
+        for note in notes:
+            print(f"[process-photos]     {note}")
 
         disqualified: list[dict] = []
         finished: dict[str, Image.Image] = {}
