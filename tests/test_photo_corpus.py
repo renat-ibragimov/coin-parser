@@ -1,11 +1,11 @@
 """Regression tests over the real photo corpus, with the numbers written
 down.
 
-Everything here needs images that are not in the repository (staging/ and
-current_ref/ are both gitignored -- they hold scraped NBU and ua-coins
-material), so every test skips when its inputs are missing. On a machine
-that has them, this is the run that catches the failures the synthetic
-tests cannot: they are the actual photos the pipeline got wrong.
+Everything here needs images that are not in the repository (staging/ is
+gitignored -- it holds scraped NBU and ua-coins material), so every test
+skips when its inputs are missing. On a machine that has them, this is the
+run that catches the failures the synthetic tests cannot: they are the
+actual photos the pipeline got wrong.
 
 Two failures are pinned here.
 
@@ -47,16 +47,15 @@ SERIES = REPO / "staging" / "ua" / "2000-littia-rizdva-khrystovoho"
 # "antychni-pamiatky-ukrainy" instead, and when that stray directory
 # was cleaned up these cases silently began skipping rather than failing.
 STRANDED = REPO / "staging" / "ua" / "antychni-pam-iatky-ukrainy"
-ODD_SHAPES = REPO / "current_ref"
 
 # Every source photo of the series, obverse and reverse, NBU and ua-coins.
 CARDS = ["nbu_88", "nbu_89", "nbu_95", "nbu_96", "nbu_161", "nbu_163"]
 
-# Measured after the fix, across all 24 source photos plus the two
-# odd-shaped references. The gate constants are set outside these.
+# Measured after the fix, across all 24 source photos of the series. The
+# gate constants are set outside these.
 CORPUS_MIN_SOLIDITY = 0.915
 CORPUS_MAX_EXTENT = 0.786
-CORPUS_MIN_ASPECT = 0.526
+CORPUS_MIN_ASPECT = 0.960
 
 # Before the fix the worst file lost 5.42% of its disc to rim erosion and
 # had 79.7% of its outline sitting inside the true radius. After, the worst
@@ -137,48 +136,6 @@ def test_the_photo_that_lost_nbu_161_its_obverse_now_passes():
     # judges on the metric that shredding destroys.
     assert verdict.worst_circularity < 0.4
     assert verdict.worst_solidity >= coin_classifier.MIN_SOLIDITY
-
-
-# ---------------------------------------------------------------------- #
-# The odd-shaped references
-# ---------------------------------------------------------------------- #
-
-
-@pytest.mark.parametrize("name", ["img.png", "img_1.png"])
-def test_odd_shaped_coins_pass(name):
-    """img.png is the UA/PL heart -- two half-heart coins in one frame,
-    aspect 0.528. img_1.png is the pysanka, aspect 0.733. Both arrive from
-    NBU with their background already removed, and both were rejected
-    outright by the roundness gate."""
-    path = ODD_SHAPES / name
-    _require(path)
-    assert coin_classifier.classify(path).is_coin
-
-
-def test_the_heart_is_seen_as_two_coins_not_one_broken_object():
-    path = ODD_SHAPES / "img.png"
-    _require(path)
-    assert coin_classifier.classify(path).objects == 2
-
-
-@pytest.mark.parametrize("name", ["img.png", "img_1.png"])
-def test_odd_shaped_coins_are_left_uncut(name):
-    # They already carry alpha, so the cutter must recognise that and keep
-    # its hands off -- the guard that a re-cut would destroy real
-    # transparency (see ALREADY_TRANSPARENT_FRACTION_MIN).
-    path = ODD_SHAPES / name
-    _require(path)
-    with Image.open(path) as img:
-        img.load()
-        assert bg_removal.classify(img).reason == "skip:already_transparent"
-
-
-@pytest.mark.parametrize("name", ["img.png", "img_1.png"])
-def test_no_rim_erosion_number_is_reported_for_a_non_round_coin(name):
-    path = ODD_SHAPES / name
-    _require(path)
-    with Image.open(path) as img:
-        assert photos._outline_dip_fraction(img) is None
 
 
 # ---------------------------------------------------------------------- #

@@ -751,10 +751,11 @@ circularity 0.281, а fill 0.876 и aspect 0.978 — в норме. Дыры о�
 **Тесты.** `tests/test_coin_classifier.py`, `tests/test_bg_removal.py`,
 `tests/test_photos.py` — синтетика, идут всегда.
 `tests/test_photo_corpus.py` — реальный корпус с зафиксированными
-числами, пропускается, если `staging/`/`current_ref/` нет (оба в
-`.gitignore`). Набор проверен на укус: возврат `FLOOD_TOLERANCE` к 28
-роняет `test_no_real_cut_chews_its_rim`, возврат гейта к циркулярности
-роняет 9 тестов, включая оба некруглых эталона.
+числами, пропускается, если `staging/` нет (он в `.gitignore`). Набор
+проверен на укус: возврат `FLOOD_TOLERANCE` к 28 роняет
+`test_no_real_cut_chews_its_rim`, возврат гейта к циркулярности роняет
+`test_the_photo_that_lost_nbu_161_its_obverse_now_passes` и остальные
+проверки формы.
 
 **Известный запас.** `MIN_ASPECT = 0.45` против 0.526 у реальной
 половинки сердца — запас невелик. Более узкую форму гейт понизит в
