@@ -43,6 +43,13 @@ MATERIALS: dict[str, list[str]] = {
     # seen elsewhere -- same material, "made of base metals" being the
     # only bimetallic option NBU uses (never precious-metal bimetallic).
     "bimetallic": ["біметал", "біметалеві із недорогоцінних металів"],
+    # NBU's cheap commemorative metal since 2018 ("zinc-based alloy" on
+    # its own English pages), and its own code for the same reason
+    # мельхіор is: нейзильбер is copper-nickel-zinc, and calling a
+    # zinc-based alloy by that name would say the coin is mostly copper
+    # when it is mostly zinc. NBU uses both labels in one series --
+    # "Збройні сили України" has 14 of this against 11 нейзильбер.
+    "zinc_alloy": ["сплав на основі цинку"],
 }
 
 QUALITY: dict[str, list[str]] = {

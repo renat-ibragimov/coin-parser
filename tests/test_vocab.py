@@ -82,3 +82,26 @@ def test_proof_like_is_its_own_quality():
     assert vocab.lookup(vocab.QUALITY, "пруф") == "proof"
     assert vocab.lookup(vocab.QUALITY, "пруф-лайк") == "proof_like"
     assert vocab.lookup(vocab.QUALITY, "пруф-лайк") != vocab.lookup(vocab.QUALITY, "пруф")
+
+
+def test_zinc_alloy_is_its_own_material():
+    # NBU's cheap commemorative metal since 2018. It is not нейзильбер:
+    # that one is copper-nickel-zinc, this one is zinc-based, and
+    # "Збройні сили України" carries 14 of the first against 11 of the
+    # second -- the same series, different coins.
+    assert vocab.lookup(vocab.MATERIALS, "сплав на основі цинку") == "zinc_alloy"
+    assert vocab.lookup(vocab.MATERIALS, "сплав на основі цинку") != vocab.lookup(
+        vocab.MATERIALS, "нейзильбер"
+    )
+
+
+def test_zinc_alloy_is_a_base_metal_for_the_loader():
+    from collector.countries.ua.load_cards import metal_kind_of
+
+    assert metal_kind_of("zinc_alloy") == "base"
+
+
+def test_zinc_alloy_survives_the_homoglyph_NBU_puts_in_it():
+    # "основі" with a Latin i, the typo NBU makes across its own pages.
+    raw = "сплав на основ" + chr(0x69) + " цинку"
+    assert vocab.lookup(vocab.MATERIALS, raw) == "zinc_alloy"
