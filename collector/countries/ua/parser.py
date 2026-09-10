@@ -147,6 +147,7 @@ class MatchSummary:
     total: int
     matched_exact: int
     matched_year_shift: int
+    matched_shared: int
     unmatched: int
     conflicts: int
     rows: list[dict] = field(default_factory=list)
@@ -160,12 +161,21 @@ class MatchSummary:
                     f"[match]   {r['source_id']:<10} {r['title']:<30} {r['denom']:<8} "
                     f"{r['matched_by']:<12} {r['url']}"
                 )
-        matched = self.matched_exact + self.matched_year_shift
+        matched = self.matched_exact + self.matched_year_shift + self.matched_shared
+        shared = (
+            f", shared_listing: {self.matched_shared}" if self.matched_shared else ""
+        )
         print(
             f"[match]   matched {matched}/{self.total} (exact: {self.matched_exact}, "
-            f"year_shift: {self.matched_year_shift}), unmatched: {self.unmatched}, "
-            f"conflicts: {self.conflicts}"
+            f"year_shift: {self.matched_year_shift}{shared}), "
+            f"unmatched: {self.unmatched}, conflicts: {self.conflicts}"
         )
+        if self.matched_shared:
+            print(
+                f"[match]   {self.matched_shared} card(s) share a declared ua-coins "
+                "listing (shared_listings.json) -- its price is the SET's, and every "
+                "card of the set will show it as its own"
+            )
 
 
 class ParserUkraine:
@@ -516,7 +526,7 @@ class ParserUkraine:
 
         unmatched_by_id = {e["source_id"]: e for e in unmatched_entries}
         rows = []
-        matched_exact = matched_year_shift = 0
+        matched_exact = matched_year_shift = matched_shared = 0
         for card in cards:
             source_id = card["source_id"]
             title = (card.get("titles", {}).get("uk") or "?")[:30]
@@ -528,6 +538,8 @@ class ParserUkraine:
                     matched_exact += 1
                 elif ua["matched_by"] == "year_shift":
                     matched_year_shift += 1
+                elif ua["matched_by"] == "shared_listing":
+                    matched_shared += 1
                 rows.append(
                     {
                         "source_id": source_id,
@@ -558,6 +570,7 @@ class ParserUkraine:
             total=len(cards),
             matched_exact=matched_exact,
             matched_year_shift=matched_year_shift,
+            matched_shared=matched_shared,
             unmatched=unmatched,
             conflicts=conflicts,
             rows=rows,

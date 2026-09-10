@@ -416,3 +416,81 @@ def test_two_equally_exact_candidates_are_still_a_conflict():
 
     assert cards[0]["ua_coins"] is None
     assert unmatched[0]["reason"].startswith("conflict")
+
+
+# ---------------------------------------------------------------------- #
+# declared shared listings
+# ---------------------------------------------------------------------- #
+
+
+def test_a_declared_set_matches_every_card_to_the_one_listing():
+    # «Пектораль»: NBU keeps a card per quarter of the rhombus, ua-coins
+    # sells the four as one position.
+    from collector.countries.ua.ua_coins import match_cards as mc
+
+    cards = [_card(f"nbu:{i}", "Пектораль", 2019, 10) for i in (1307, 1308, 1309, 1310)]
+    rows_by_year = {2019: [_row(2294, "Пектораль", 2019, 10.0)]}
+    shared = {2294: frozenset({"nbu:1307", "nbu:1308", "nbu:1309", "nbu:1310"})}
+    cards, unmatched = mc(cards, rows_by_year, "2026-01-01T00:00:00+00:00", shared=shared)
+    assert unmatched == []
+    assert {c["ua_coins"]["id"] for c in cards} == {2294}
+    assert {c["ua_coins"]["matched_by"] for c in cards} == {"shared_listing"}
+
+
+def test_the_declaration_is_the_exact_membership_not_a_permission_to_share():
+    # A fifth card on the same row means the declaration no longer
+    # describes what is happening, so the guard fires again -- on all of
+    # them, including the four that are in it.
+    from collector.countries.ua.ua_coins import match_cards as mc
+
+    cards = [_card(f"nbu:{i}", "Пектораль", 2019, 10) for i in (1307, 1308, 1309, 1310, 9999)]
+    rows_by_year = {2019: [_row(2294, "Пектораль", 2019, 10.0)]}
+    shared = {2294: frozenset({"nbu:1307", "nbu:1308", "nbu:1309", "nbu:1310"})}
+    cards, unmatched = mc(cards, rows_by_year, "2026-01-01T00:00:00+00:00", shared=shared)
+    assert [c["ua_coins"] for c in cards] == [None] * 5
+    assert len(unmatched) == 5
+    assert all(e["reason"].startswith("conflict") for e in unmatched)
+
+
+def test_a_missing_card_of_the_set_also_reopens_the_conflict():
+    # Three of the four claiming it is not the declared set either: the
+    # fourth may have failed to parse, and quietly pricing three coins
+    # off a four-coin listing is the thing being guarded against.
+    from collector.countries.ua.ua_coins import match_cards as mc
+
+    cards = [_card(f"nbu:{i}", "Пектораль", 2019, 10) for i in (1307, 1308, 1309)]
+    rows_by_year = {2019: [_row(2294, "Пектораль", 2019, 10.0)]}
+    shared = {2294: frozenset({"nbu:1307", "nbu:1308", "nbu:1309", "nbu:1310"})}
+    cards, unmatched = mc(cards, rows_by_year, "2026-01-01T00:00:00+00:00", shared=shared)
+    assert [c["ua_coins"] for c in cards] == [None] * 3
+    assert len(unmatched) == 3
+
+
+def test_an_undeclared_row_claimed_twice_is_still_a_conflict():
+    from collector.countries.ua.ua_coins import match_cards as mc
+
+    cards = [_card("nbu:1", "Соня садова", 1999, 10), _card("nbu:2", "Соня садова", 1999, 10)]
+    rows_by_year = {1999: [_row(1, "Соня садова", 1999, 10.0)]}
+    cards, unmatched = mc(cards, rows_by_year, "2026-01-01T00:00:00+00:00", shared={})
+    assert [c["ua_coins"] for c in cards] == [None, None]
+    assert len(unmatched) == 2
+
+
+def test_a_single_claimant_is_a_plain_match_even_where_a_set_is_declared():
+    # The shared status is about sharing; one card on the row is the
+    # ordinary case and must keep saying "exact".
+    from collector.countries.ua.ua_coins import match_cards as mc
+
+    cards = [_card("nbu:1307", "Пектораль", 2019, 10)]
+    rows_by_year = {2019: [_row(2294, "Пектораль", 2019, 10.0)]}
+    shared = {2294: frozenset({"nbu:1307"})}
+    cards, _ = mc(cards, rows_by_year, "2026-01-01T00:00:00+00:00", shared=shared)
+    assert cards[0]["ua_coins"]["matched_by"] == "exact"
+
+
+def test_the_shipped_declaration_file_parses_and_holds_the_pectoral_set():
+    from collector.countries.ua.ua_coins import shared_listings
+
+    assert shared_listings()[2294] == frozenset(
+        {"nbu:1307", "nbu:1308", "nbu:1309", "nbu:1310"}
+    )

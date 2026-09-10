@@ -15,6 +15,7 @@ step lives off it, and it comes from the very page the matcher fetches.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -451,8 +452,36 @@ def _disambiguate_by_quality(
     return narrowed if len(narrowed) == 1 else candidates
 
 
+SHARED_LISTINGS_FILE = Path(__file__).with_name("shared_listings.json")
+
+
+def shared_listings(path: Path | None = None) -> dict[int, frozenset[str]]:
+    """{ua-coins row id: the exact set of NBU cards allowed to share it}.
+
+    NBU sometimes catalogues a set one card per coin while ua-coins sells
+    it as a single position -- «Пектораль» is four cards against row 2294.
+    Left alone the many-to-one guard below drops all of them, which is the
+    right default: a row claimed by several cards is far more often a
+    matching mistake than a set. So the sets are declared by hand, in
+    shared_listings.json, after somebody has looked at the case.
+
+    The set is exact, not a minimum. A fifth card arriving on 2294 makes
+    the claim stop matching this declaration and the guard fires again --
+    which is the point of writing the members down rather than a bare
+    "this row may be shared".
+    """
+    raw = json.loads((path or SHARED_LISTINGS_FILE).read_text(encoding="utf-8"))
+    return {
+        int(entry["ua_coins_id"]): frozenset(entry["source_ids"])
+        for entry in raw.get("shared", [])
+    }
+
+
 def match_cards(
-    cards: list[dict], rows_by_year: dict[int, list[UaCoinsRow]], matched_at: str
+    cards: list[dict],
+    rows_by_year: dict[int, list[UaCoinsRow]],
+    matched_at: str,
+    shared: dict[int, frozenset[str]] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Sets card["ua_coins"] on every card (a dict, or None) and returns
     (cards, unmatched_entries). Never mutates rows_by_year."""
@@ -519,12 +548,22 @@ def match_cards(
         }
 
     # A ua-coins row claimed by more than one card is a conflict too, even
-    # though each card individually looked like a unique match.
+    # though each card individually looked like a unique match. Unless the
+    # sharing is a declared set -- and then only if the cards claiming it
+    # are exactly the ones declared.
+    declared = shared_listings() if shared is None else shared
     claims: dict[int, list[str]] = {}
     for source_id, result in per_card.items():
         if result["status"] == "match":
             claims.setdefault(result["row"].id, []).append(source_id)
-    contested = {row_id for row_id, holders in claims.items() if len(holders) > 1}
+    contested = {
+        row_id
+        for row_id, holders in claims.items()
+        if len(holders) > 1 and declared.get(row_id) != frozenset(holders)
+    }
+    is_shared = {
+        row_id for row_id, holders in claims.items() if len(holders) > 1
+    } - contested
 
     unmatched_entries: list[dict] = []
     for card in cards:
@@ -542,7 +581,9 @@ def match_cards(
             card["ua_coins"] = {
                 "id": row.id,
                 "url": row.url,
-                "matched_by": result["matched_by"],
+                "matched_by": (
+                    "shared_listing" if row.id in is_shared else result["matched_by"]
+                ),
                 "year_used": result["year_used"],
                 "matched_at": matched_at,
             }
