@@ -196,3 +196,40 @@ def test_normalize_match_keeps_apostrophes():
     # Quote marks are noise, but an apostrophe carries a letter's worth of
     # meaning -- it is folded to one character, not dropped.
     assert normalize_match("Пам’ятки") != normalize_match("Памятки")
+
+
+def test_normalize_match_drops_an_apostrophe_used_as_an_outer_quote():
+    # ua-coins row 3003 wraps the whole name in ’…’ because the name
+    # already contains straight quotes; NBU writes it unwrapped. Same
+    # coin, and the only difference is those two characters.
+    ua_coins = '’Українські народні казки. "Кирило Кожум’яка"’ у сувенірному пакованні'
+    nbu = 'Українські народні казки. "Кирило Кожум’яка" у сувенірному пакованні'
+    assert normalize_match(ua_coins) == normalize_match(nbu)
+
+
+def test_normalize_match_drops_a_grave_accent_used_as_an_outer_quote():
+    # NBU's own side of the same habit: `Вотан` in the Melitopol coin,
+    # against ua-coins' unquoted form.
+    nbu = "Прорив німецької лінії оборони `Вотан` та визволення Мелітополя"
+    plain = "Прорив німецької лінії оборони Вотан та визволення Мелітополя"
+    assert normalize_match(nbu) == normalize_match(plain)
+
+
+def test_the_apostrophe_inside_the_wrapped_name_survives_the_wrapper_going():
+    # The rule is positional, so both uses of ’ appear in this one title:
+    # the outer pair goes, the one in Кожум’яка stays.
+    wrapped = '’Кирило Кожум’яка’'
+    assert normalize_match(wrapped) == "Кирило Кожум’яка"
+
+
+def test_normalize_match_keeps_an_apostrophe_at_a_word_boundary_of_neither_kind():
+    # An apostrophe only reads as a letter between two of them: "Кожум’яка"
+    # keeps it, a trailing one is punctuation and goes.
+    assert normalize_match("Кожум’яка") == "Кожум’яка"
+    assert normalize_match("Кожумяка’") == "Кожумяка"
+
+
+def test_normalize_match_still_folds_the_english_possessive():
+    # CHILDREN’S ZODIAC -- letters both sides, so it is an apostrophe.
+    assert normalize_match("CHILDREN'S ZODIAC") == normalize_match("CHILDREN’S ZODIAC")
+    assert "’" in normalize_match("CHILDREN'S ZODIAC")

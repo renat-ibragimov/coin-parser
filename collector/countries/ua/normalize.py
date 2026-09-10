@@ -217,23 +217,54 @@ _APOSTROPHE_CANON = "’"
 # used at the time -- ua-coins row 2659 keeps NBU's straight quotes in
 # `"Країна супергероїв. Дякуємо зброярам!" у сувенірному пакованні`,
 # while our own parsed title has them stripped. Dropped from both sides
-# here rather than "fixed" on either. Only the unambiguous quote marks:
-# the apostrophe look-alikes above stay, folded, because there they carry
-# a letter's worth of meaning ("Пам’ятки").
+# here rather than "fixed" on either.
+#
+# The apostrophe look-alikes are not in this list because inside a word
+# they carry a letter's worth of meaning ("Пам’ятки"). But ua-coins also
+# uses ’ as an outer quote mark, around a name that already contains
+# straight quotes: `’Українські народні казки. "Кирило Кожум’яка"’ у
+# сувенірному пакованні` against NBU's unwrapped form of the same title.
+# 33 rows of the cached catalogue are written that way. What separates
+# the two uses is position, not character: a Ukrainian apostrophe always
+# stands between two letters, and a quote mark never does -- which is
+# the rule _fold_apostrophes applies.
 _MATCH_DROP_CHARS = '«»"“”'
+
+
+def _fold_apostrophes(text: str) -> str:
+    """Canonicalize the apostrophes and drop the quote marks, telling them
+    apart by where they stand.
+
+    Between two letters it is an apostrophe -- Кожум’яка, пам`ятки,
+    CHILDREN’S -- and folds to one canonical character. Anywhere else it
+    is being used as a quote mark and goes, the same as « " “ do.
+
+    Judged on the text as it arrives, before the other quote marks are
+    dropped: removing those first would close a gap like `"’` and leave
+    an outer quote looking letter-flanked.
+    """
+    out: list[str] = []
+    for i, ch in enumerate(text):
+        if ch not in _APOSTROPHE_CHARS:
+            out.append(ch)
+            continue
+        prev = text[i - 1] if i else ""
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if prev.isalpha() and nxt.isalpha():
+            out.append(_APOSTROPHE_CANON)
+    return "".join(out)
 
 
 def normalize_match(s: str) -> str:
     """Normalize a string (series name, coin title) for equality
     comparison only -- NOT for display. Applies fix_homoglyphs, folds
-    every apostrophe look-alike to one canonical character, drops quote
-    marks, and collapses whitespace. Two strings that differ only in
-    which apostrophe character, which script a look-alike letter is in,
-    or whether a name is quoted compare equal after this.
+    every apostrophe look-alike inside a word to one canonical character,
+    drops quote marks -- an apostrophe look-alike used as one included --
+    and collapses whitespace. Two strings that differ only in which
+    apostrophe character, which script a look-alike letter is in, or
+    whether a name is quoted compare equal after this.
     """
-    text = fix_homoglyphs(s)
-    for ch in _APOSTROPHE_CHARS:
-        text = text.replace(ch, _APOSTROPHE_CANON)
+    text = _fold_apostrophes(fix_homoglyphs(s))
     for ch in _MATCH_DROP_CHARS:
         text = text.replace(ch, "")
     return re.sub(r"\s+", " ", text).strip()
