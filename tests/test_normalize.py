@@ -72,6 +72,22 @@ def test_normalize_title_no_suffix():
     assert suffix is None
 
 
+def test_normalize_title_strips_bimetallic_suffix():
+    # NBU spells the bimetallic material code with two letters ("бн") where
+    # every other material gets one (н/с/з/м) -- must not be left behind.
+    clean, suffix = normalize_title("На межі тисячоліть  (бн)")
+    assert clean == "На межі тисячоліть"
+    assert suffix == "бн"
+
+
+def test_normalize_title_keeps_a_real_parenthetical_alt_name():
+    # "(Кролика)" is an alternate name (nbu:1520, "Рік Кота (Кролика)"),
+    # not a material-suffix code -- must survive untouched.
+    clean, suffix = normalize_title("Рік Кота (Кролика)")
+    assert clean == "Рік Кота (Кролика)"
+    assert suffix is None
+
+
 def test_normalize_title_collapses_whitespace_and_quotes():
     clean, suffix = normalize_title('«Гетьманські   століці»   (з)')
     assert clean == "Гетьманські століці"
