@@ -33,6 +33,7 @@ from psycopg.types.json import Jsonb
 
 from collector.core.db import existing_columns, get_database_url
 from collector.core.staging import DEFAULT_STAGING_ROOT
+from collector.countries.ua.ua_coins import shared_listings
 from collector.countries.ua.prices import (
     PricePoint,
     PriceSeriesAnomaly,
@@ -120,17 +121,29 @@ def _cards_json_paths(staging_root: Path, series_slug: str | None) -> list[Path]
 
 
 def build_card_index(
-    staging_root: Path, series_slug: str | None = None
-) -> tuple[dict[int, CardRef], list[str]]:
-    """{ua_coins_id: CardRef} across the staged series, plus warnings.
+    staging_root: Path,
+    series_slug: str | None = None,
+    shared: dict[int, frozenset[str]] | None = None,
+) -> tuple[dict[int, list[CardRef]], list[str]]:
+    """{ua_coins_id: [CardRef]} across the staged series, plus warnings.
 
     The price cache is shared between series, so the ua-coins id is the
-    only key that links a price file back to an NBU card. Two series
-    claiming the same ua-coins id for DIFFERENT cards would make that
-    link ambiguous, so such an id is dropped with a warning rather than
-    resolved by guessing which series is right.
+    only key that links a price file back to an NBU card. Two cards
+    claiming the same id would make that link ambiguous, so such an id is
+    dropped with a warning rather than resolved by guessing which is
+    right -- the same default the matcher applies.
+
+    A listing declared in shared_listings.json is the exception, and then
+    the list holds every card of the set: NBU catalogues «Пектораль» as
+    four coins where ua-coins sells one position, and all four are meant
+    to carry that position's history. Whether the cards claiming it are
+    exactly the declared ones is checked in the matcher, which is the
+    step that sees the whole series; here a declared id is simply allowed
+    to have more than one card, since --series can narrow this scan to a
+    part of the set.
     """
-    index: dict[int, CardRef] = {}
+    declared = shared_listings() if shared is None else shared
+    index: dict[int, list[CardRef]] = {}
     warnings: list[str] = []
     contested: set[int] = set()
 
@@ -151,16 +164,17 @@ def build_card_index(
                 page_url=ua["url"],
                 series_slug=slug,
             )
-            existing = index.get(coin_id)
-            if existing is not None and existing.source_id != ref.source_id:
+            existing = index.get(coin_id, [])
+            if any(r.source_id == ref.source_id for r in existing):
+                continue
+            if existing and coin_id not in declared:
                 contested.add(coin_id)
                 warnings.append(
-                    f"ua-coins {coin_id} is claimed by {existing.source_id} "
-                    f"({existing.series_slug}) and {ref.source_id} ({slug}) -- skipped"
+                    f"ua-coins {coin_id} is claimed by {existing[0].source_id} "
+                    f"({existing[0].series_slug}) and {ref.source_id} ({slug}) -- skipped"
                 )
                 continue
-            if existing is None:
-                index[coin_id] = ref
+            index.setdefault(coin_id, []).append(ref)
 
     for coin_id in contested:
         index.pop(coin_id, None)
@@ -533,13 +547,15 @@ def _collect(
     A bad file should never leave a half-open transaction behind."""
     index, warnings = build_card_index(staging_root, series_slug)
     summary.warnings.extend(warnings)
-    print(f"[load-prices] {len(index)} matched card(s) in staging")
+    cards_in_index = sum(len(refs) for refs in index.values())
+    extra = cards_in_index - len(index)
+    shared_note = f" ({extra} of them sharing a declared listing)" if extra else ""
+    print(f"[load-prices] {cards_in_index} matched card(s) in staging{shared_note}")
 
     ready: list[tuple[CardRef, list[PricePoint], PriceCoinReport]] = []
     early: list[PriceCoinReport] = []
 
-    for coin_id in sorted(index):
-        ref = index[coin_id]
+    for coin_id, ref in ((cid, r) for cid in sorted(index) for r in index[cid]):
         report = PriceCoinReport(
             ua_coins_id=coin_id, source_id=ref.source_id, status="skipped:no_prices_file"
         )

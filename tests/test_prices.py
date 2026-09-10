@@ -391,8 +391,9 @@ def _card(source_id, ua_coins_id):
 def test_build_card_index_maps_ua_coins_id_to_card(tmp_path):
     _write_cards(tmp_path, "series-a", [_card("nbu:88", 1998), _card("nbu:89", 1999)])
     index, warnings = build_card_index(tmp_path)
-    assert index[1998].source_id == "nbu:88"
-    assert index[1999].source_id == "nbu:89"
+    # A list even in the ordinary case: one listing, one card on it.
+    assert [r.source_id for r in index[1998]] == ["nbu:88"]
+    assert [r.source_id for r in index[1999]] == ["nbu:89"]
     assert warnings == []
 
 
@@ -651,3 +652,41 @@ def test_refresh_recent_never_moves_a_rows_id_or_date():
     assert "DELETE" not in sql
     assert "SET price = t.price" in sql
     assert "observed_at =" not in sql.split("SET", 1)[1].split("FROM", 1)[0]
+
+
+def test_build_card_index_keeps_every_card_of_a_declared_set(tmp_path):
+    # «Пектораль»: four NBU cards on ua-coins position 2294. Without the
+    # declaration this is the ambiguous case above and all four are
+    # dropped -- which is how three of them lost their price history the
+    # first time the series was loaded.
+    _write_cards(
+        tmp_path,
+        "dukhovni-skarby-ukrainy",
+        [_card(f"nbu:{i}", 2294) for i in (1307, 1308, 1309, 1310)],
+    )
+    shared = {2294: frozenset({"nbu:1307", "nbu:1308", "nbu:1309", "nbu:1310"})}
+    index, warnings = build_card_index(tmp_path, shared=shared)
+    assert [r.source_id for r in index[2294]] == [
+        "nbu:1307",
+        "nbu:1308",
+        "nbu:1309",
+        "nbu:1310",
+    ]
+    assert warnings == []
+
+
+def test_build_card_index_still_drops_an_undeclared_id_two_cards_claim(tmp_path):
+    _write_cards(tmp_path, "series-a", [_card("nbu:88", 1998)])
+    _write_cards(tmp_path, "series-b", [_card("nbu:777", 1998)])
+    index, warnings = build_card_index(tmp_path, shared={})
+    assert 1998 not in index
+    assert any("claimed by" in w for w in warnings)
+
+
+def test_build_card_index_does_not_list_the_same_card_twice(tmp_path):
+    # The same series read twice (or a card duplicated in cards.json)
+    # must not double the history that gets loaded for it.
+    _write_cards(tmp_path, "series-a", [_card("nbu:88", 1998), _card("nbu:88", 1998)])
+    index, warnings = build_card_index(tmp_path)
+    assert [r.source_id for r in index[1998]] == ["nbu:88"]
+    assert warnings == []
