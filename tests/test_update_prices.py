@@ -473,3 +473,69 @@ def test_fetch_scope_filters_by_series_and_by_the_shared_catalogue():
     assert "created_by IS NULL" in conn.sql
     assert "status = 'active'" in conn.sql
     assert scope[0].source_key == "nbu:88"
+
+
+# --------------------------------------------------------------------- #
+# the report coin_keeper stores (docs/13-admin.md there, part 1)
+# --------------------------------------------------------------------- #
+
+
+def _summary_with(**kwargs) -> up.UpdatePricesSummary:
+    summary = up.UpdatePricesSummary(run_date=date(2026, 9, 10))
+    for key, value in kwargs.items():
+        setattr(summary, key, value)
+    return summary
+
+
+def test_report_payload_carries_the_counters():
+    summary = _summary_with(
+        series=["rizdvo", "zodiak"],
+        scope=3,
+        years_ok=[1999, 2000],
+        coins=[
+            up.CoinQuoteReport(source_key="nbu:1", item_id=1, status="quoted", inserted=1),
+            up.CoinQuoteReport(source_key="nbu:2", item_id=2, status="quoted", updated=1),
+            up.CoinQuoteReport(source_key="nbu:3", item_id=3, status="no_quote:no_data"),
+        ],
+    )
+
+    payload = summary.report_payload()
+
+    assert payload["status"] == "ok"
+    assert payload["runDate"] == "2026-09-10"
+    assert payload["exitCode"] == 0
+    assert payload["stats"] == {
+        "country": up.COUNTRY,
+        "series": 2,
+        "scope": 3,
+        "years": 2,
+        "matched": 2,
+        "inserted": 1,
+        "corrected": 1,
+        "dup": 0,
+        "no_quote": 1,
+        "no_link": 0,
+        "errors": 0,
+    }
+    # A good night is one line: no prose, even though a coin went unquoted.
+    assert payload["details"] is None
+
+
+def test_report_payload_explains_a_bad_night():
+    summary = _summary_with(years_ok=[1999], years_failed=[1996, 1997])
+
+    payload = summary.report_payload()
+
+    assert payload["status"] == "partial"
+    assert payload["exitCode"] == 1
+    assert "1996, 1997" in payload["details"]
+
+
+def test_report_payload_of_a_run_that_never_started():
+    summary = _summary_with(error="reading the catalog: connection refused")
+
+    payload = summary.report_payload()
+
+    assert payload["status"] == "failed"
+    assert payload["exitCode"] == 2
+    assert "connection refused" in payload["details"]

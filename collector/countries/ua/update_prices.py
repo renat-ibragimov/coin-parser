@@ -429,6 +429,10 @@ def build_rows(
 # ---------------------------------------------------------------------- #
 
 
+# What the report says the run was about. This adapter is Ukraine's.
+COUNTRY = "Україна"
+
+
 @dataclass
 class UpdatePricesSummary:
     run_date: date | None = None
@@ -507,6 +511,52 @@ class UpdatePricesSummary:
             f"inserted={self.inserted} corrected={self.updated} dup={self.duplicates} "
             f"no_quote={self.no_quote} no_link={self.no_link} errors={self.errors}"
         )
+
+    def report_payload(self) -> dict:
+        """The run as coin_keeper's admin section stores it.
+
+        The counters go over as they are; the prose is assembled only when
+        something went wrong, because a good night is one line by decision
+        (docs/13-admin.md in coin_keeper, 2.4).
+        """
+        return {
+            "status": self.status_word(),
+            "runDate": self.run_date.isoformat() if self.run_date else None,
+            "summary": self.summary_line(),
+            "stats": {
+                "country": COUNTRY,
+                "series": len(self.series),
+                "scope": self.scope,
+                "years": len(self.years_ok),
+                "matched": self.matched,
+                "inserted": self.inserted,
+                "corrected": self.updated,
+                "dup": self.duplicates,
+                "no_quote": self.no_quote,
+                "no_link": self.no_link,
+                "errors": self.errors,
+            },
+            "details": self.details_text(),
+            "exitCode": self.exit_code,
+        }
+
+    def details_text(self) -> str | None:
+        """Why a bad run was bad, in the order a person would ask."""
+        if self.exit_code == EXIT_OK and not self.warnings:
+            return None
+        parts: list[str] = []
+        if self.error:
+            parts.append(self.error)
+        if self.years_failed:
+            years = ", ".join(str(year) for year in self.years_failed)
+            parts.append(f"years NOT downloaded ({len(self.years_failed)}): {years}")
+        parts.extend(self.warnings)
+        unquoted = [c.source_key for c in self.coins if c.status.startswith("no_quote")]
+        if unquoted:
+            shown = ", ".join(unquoted[:10])
+            more = "" if len(unquoted) <= 10 else f" (+{len(unquoted) - 10})"
+            parts.append(f"no quote: {shown}{more}")
+        return "\n".join(parts) or None
 
     def print_report(self) -> None:
         stamp = self.run_date.isoformat() if self.run_date else "?"

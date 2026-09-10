@@ -29,6 +29,13 @@ x-collector: &collector
     PGPORT: "${PGPORT:-5432}"
     PGUSER: "${POSTGRES_USER:-coinkeeper}"
     PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing -- pass --env-file ~/coinkeeper/.env}"
+    # Where the run reports itself. The token comes from the same
+    # coin_keeper .env as the database password, so this repository still
+    # holds no secret of its own; the API answers on the shared network
+    # under its compose service name. Unset token = no reporting, which is
+    # what a workstation gets.
+    JOB_REPORT_URL: "${JOB_REPORT_URL:-http://api:8000/api/v1}"
+    JOB_REPORT_TOKEN: "${JOB_REPORT_TOKEN:-}"
   volumes:
     # The checkout's own staging/, so the night's kept HTML can be read
     # with ls instead of docker. Created by the wrapper before the run:

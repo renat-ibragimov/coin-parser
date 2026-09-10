@@ -35,6 +35,7 @@ import os
 import sys
 from pathlib import Path
 
+from collector.core.job_report import JobReporter
 from collector.core.staging import DEFAULT_STAGING_ROOT
 from collector.countries.ua.parser import ParserUkraine
 
@@ -141,7 +142,20 @@ def main(argv: list[str] | None = None) -> int:
         # The cron step. Nothing about it is per-series (its scope is the
         # catalog itself), and its exit code is the whole report as far
         # as cron is concerned: 0 fine, 1 some years lost, 2 nothing done.
-        return ParserUkraine(staging_root=staging_root).update_prices().exit_code
+        #
+        # The same run is also reported to coin_keeper, which records it and
+        # puts it in the admin telegram chat. The report is opened first so an
+        # interrupted run leaves a trace: a container killed mid-work cannot
+        # report its own death, and the open row is the only sign of it.
+        reporter = JobReporter.from_env("update-prices")
+        reporter.open()
+        try:
+            summary = ParserUkraine(staging_root=staging_root).update_prices()
+        except BaseException as exc:  # noqa: BLE001 - reported, then re-raised
+            reporter.crashed(f"{type(exc).__name__}: {exc}")
+            raise
+        reporter.finish(summary.report_payload())
+        return summary.exit_code
 
     if args.step == "load-prices":
         # Unlike the other per-series steps this one runs with or without
