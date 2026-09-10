@@ -1,9 +1,9 @@
 """CLI entry point.
 
-    python -m collector ua --series "<name>" --step fetch|parse|all|match|fetch-photos|process-photos
+    python -m collector ua --series "<name>" --step fetch|parse|all|match|fetch-prices|fetch-photos|process-photos
+                                                # fetch-prices is also part of 'all'
     python -m collector ua --step series
     python -m collector ua --step load-series   # writes to coin_keeper's DB, needs DATABASE_URL
-    python -m collector ua --series "<name>" --step fetch-prices
     python -m collector ua --series "<name>" --step load-cards
                                                 # writes to coin_keeper's DB, needs DATABASE_URL
                                                 # mirror media/out into the bucket FIRST --
@@ -71,11 +71,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ],
         default="all",
         help=(
-            "which step to run ('all' = fetch, parse, match, fetch-photos, process-photos "
-            "-- fetch-prices/load-cards/load-prices/update-prices stay out of 'all' on "
-            "purpose: one hits the network hard, the others write to production, "
-            "load-cards needs the media mirrored into the bucket first, and update-prices "
-            "is the nightly cron step rather than part of collecting a series)"
+            "which step to run ('all' = fetch, parse, match, fetch-prices, fetch-photos, "
+            "process-photos -- load-cards/load-prices/update-prices stay out of 'all' on "
+            "purpose: they write to production, load-cards needs the media mirrored into "
+            "the bucket first, and update-prices is the nightly cron step rather than part "
+            "of collecting a series)"
         ),
     )
     ua.add_argument(
@@ -175,12 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.parse()
     if args.step in ("match", "all"):
         parser.match_ua_coins(refresh=args.refresh_ua_coins)
+    if args.step in ("fetch-prices", "all"):
+        parser.fetch_prices(refresh=args.refresh_prices)
     if args.step in ("fetch-photos", "all"):
         parser.fetch_photos(refresh=args.refresh_photos)
     if args.step in ("process-photos", "all"):
         parser.process_photos()
-    if args.step == "fetch-prices":
-        parser.fetch_prices(refresh=args.refresh_prices)
 
     return 0
 
