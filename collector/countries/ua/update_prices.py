@@ -533,7 +533,7 @@ class UpdatePricesSummary:
         if self.coins:
             print(
                 f"[update-prices]   {'source_key':<12} {'ua_coins':<9} {'status':<20} "
-                f"{'price':>12} {'as of':<12} {'ins':>4} {'dup':>4}"
+                f"{'price':>12} {'as of':<12} {'ins':>4} {'upd':>4} {'dup':>4}"
             )
         for c in self.coins:
             price = f"{c.price}" if c.price is not None else ""
@@ -541,7 +541,8 @@ class UpdatePricesSummary:
             ua = str(c.ua_coins_id) if c.ua_coins_id is not None else ""
             print(
                 f"[update-prices]   {c.source_key:<12} {ua:<9} {c.status:<20} "
-                f"{price:>12} {as_of:<12} {c.inserted:>4} {c.duplicates:>4}"
+                f"{price:>12} {as_of:<12} {c.inserted:>4} {c.updated:>4} "
+                f"{c.duplicates:>4}"
             )
             if c.note and not c.status == "quoted":
                 print(f"[update-prices]     {c.note}")
