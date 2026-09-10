@@ -11,7 +11,22 @@
 # Times are the SERVER's local time, not UTC.
 #     crontab -l          # check it took
 #
-# 03:15 is chosen away from the top of the hour on purpose: ua-coins
-# recomputes its price column overnight and rate-limits hard, and every
-# scraper in the world fires at :00.
-15 3 * * * /home/deploy/coin-parser/deploy/run-update-prices.sh >> /home/deploy/logs/update-prices.log 2>&1
+# The server runs on UTC, and this cron (Ubuntu's vixie 3.0pl1) has no
+# CRON_TZ -- the binary carries no timezone handling at all -- so the
+# hour here has to be written in UTC by hand.
+#
+# 07:10 UTC is 10:10 in Kyiv while Ukraine is on EEST (UTC+3). It slips
+# to 09:10 Kyiv when the clocks go back at the end of October; move this
+# line to 08:10 then if the Kyiv hour is what matters. Nothing breaks
+# either way -- load-prices reopens the last REFRESH_WINDOW_DAYS days to
+# correction, so a quote read too early is fixed by a later history
+# read rather than kept forever.
+#
+# Why not the old 03:15: ua-coins does not have the day's number that
+# early. It recomputes during the morning (2026-09-10: still 349 at
+# 08:13 UTC, 357 by 08:51), so a night run banked a figure the site
+# itself had not settled on.
+#
+# The :10 rather than :00 is kept from the original: ua-coins rate-limits
+# hard, and every scraper in the world fires at the top of the hour.
+10 7 * * * /home/deploy/coin-parser/deploy/run-update-prices.sh >> /home/deploy/logs/update-prices.log 2>&1

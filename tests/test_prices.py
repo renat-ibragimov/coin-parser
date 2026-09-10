@@ -572,3 +572,82 @@ def test_nothing_loaded_means_no_statements_at_all():
     summary = load_prices_mod.LoadPricesSummary(drop_ucoin=True)
     load_prices_mod._handle_ucoin(conn, [], summary)
     assert conn.statements == []
+
+
+# ---------------------------------------------------------------------- #
+# the correction window
+# ---------------------------------------------------------------------- #
+
+
+def test_refresh_window_covers_seven_calendar_days_including_today():
+    # A window of 7 run on the 10th reaches back to the 4th -- the day
+    # nbu:418 was quoted at 299 and later revised to 295.
+    start = load_prices_mod.refresh_window_start(date(2026, 9, 10))
+    assert start == datetime(2026, 9, 4, tzinfo=timezone.utc)
+
+
+def test_refresh_window_start_is_midnight_utc_like_every_observed_at():
+    # build_copy_rows pins observed_at to midnight UTC; a window whose
+    # edge sat at any other instant would cut a day in half.
+    start = load_prices_mod.refresh_window_start(date(2026, 1, 1))
+    assert (start.hour, start.minute, start.second, start.tzinfo) == (0, 0, 0, timezone.utc)
+
+
+class _UpdateConn:
+    """Answers the single UPDATE refresh_recent issues."""
+
+    def __init__(self, updated=None):
+        self.updated = updated or {}
+        self.statements = []
+
+    def execute(self, sql, params=None):
+        self.statements.append((sql, params))
+        return _Result([(item_id,) for item_id, n in self.updated.items() for _ in range(n)])
+
+
+def test_refresh_recent_counts_the_rows_it_corrected_per_coin():
+    conn = _UpdateConn(updated={559: 2, 560: 1})
+    assert load_prices_mod.refresh_recent(conn, datetime(2026, 9, 4, tzinfo=timezone.utc)) == {
+        559: 2,
+        560: 1,
+    }
+
+
+def test_refresh_recent_is_bounded_by_the_window_and_leaves_hand_entered_rows_alone():
+    conn = _UpdateConn()
+    window_start = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    load_prices_mod.refresh_recent(conn, window_start)
+    sql, params = conn.statements[0]
+    assert params["window_start"] == window_start
+    assert "m.observed_at >= %(window_start)s" in sql
+    assert "m.created_by IS NULL" in sql
+    # Only a row whose number actually moved is rewritten: without this
+    # every rerun would touch every row in the window for nothing.
+    assert "m.price IS DISTINCT FROM t.price" in sql
+
+
+def test_refresh_recent_matches_on_the_same_key_the_insert_skips_on():
+    # If these two ever disagree, a row would be neither inserted nor
+    # corrected, and the day would silently keep its stale price.
+    conn = _UpdateConn()
+    load_prices_mod.refresh_recent(conn, datetime(2026, 9, 4, tzinfo=timezone.utc))
+    sql, _ = conn.statements[0]
+    for clause in (
+        "m.catalog_item_id = t.catalog_item_id",
+        "m.source = t.source",
+        "m.grade IS NOT DISTINCT FROM t.grade",
+        "m.observed_at = t.observed_at",
+    ):
+        assert clause in sql
+
+
+def test_refresh_recent_never_moves_a_rows_id_or_date():
+    # The storefront and any future reference to a snapshot point at the
+    # row; a correction that deleted and reinserted would break them.
+    conn = _UpdateConn()
+    load_prices_mod.refresh_recent(conn, datetime(2026, 9, 4, tzinfo=timezone.utc))
+    sql, _ = conn.statements[0]
+    assert sql.lstrip().startswith("UPDATE")
+    assert "DELETE" not in sql
+    assert "SET price = t.price" in sql
+    assert "observed_at =" not in sql.split("SET", 1)[1].split("FROM", 1)[0]

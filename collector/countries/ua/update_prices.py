@@ -25,7 +25,7 @@ What it does, once per night:
     3. each coin finds its own row by ua-coins id, taken from the
        UA-Coins price_source_links row that --step match wrote. Nothing
        is re-matched here: matching is a decision, and decisions are not
-       re-taken unattended at 03:15.
+       re-taken unattended by a cron job.
     4. the quotes go into market_price_snapshots through the very same
        batch that load-prices uses, so the two steps write identical
        rows and cannot fight each other. Reruns collapse on the
@@ -69,6 +69,8 @@ from collector.countries.ua.load_prices import (
     copy_rows,
     create_tmp_table,
     insert_from_tmp,
+    refresh_recent,
+    refresh_window_start,
 )
 from collector.countries.ua.load_series import load_db_map
 from collector.countries.ua.nbu_client import USER_AGENT
@@ -316,6 +318,7 @@ class CoinQuoteReport:
     as_of: date | None = None
     table_year: int | None = None
     inserted: int = 0
+    updated: int = 0
     duplicates: int = 0
     note: str | None = None
 
@@ -448,6 +451,10 @@ class UpdatePricesSummary:
         return sum(c.inserted for c in self.coins)
 
     @property
+    def updated(self) -> int:
+        return sum(c.updated for c in self.coins)
+
+    @property
     def duplicates(self) -> int:
         return sum(c.duplicates for c in self.coins)
 
@@ -497,7 +504,7 @@ class UpdatePricesSummary:
             f"update-prices {self.status_word()} "
             f"series={len(self.series)} scope={self.scope} "
             f"years={len(self.years_ok)} matched={self.matched} "
-            f"inserted={self.inserted} dup={self.duplicates} "
+            f"inserted={self.inserted} corrected={self.updated} dup={self.duplicates} "
             f"no_quote={self.no_quote} no_link={self.no_link} errors={self.errors}"
         )
 
@@ -553,7 +560,7 @@ class UpdatePricesSummary:
         )
         print(
             f"[update-prices] points: inserted {self.inserted}, "
-            f"already present {self.duplicates}"
+            f"corrected {self.updated}, already present {self.duplicates}"
         )
         print(self.summary_line())
 
@@ -574,11 +581,20 @@ def _insert(
     create_tmp_table(conn)
     copy_rows(conn, rows)
     inserted_by_item = insert_from_tmp(conn, "is_suspect" in cols)
+    # The batch is dated by the table header, not by the run, so this is
+    # not only a rerun guard: on a morning when ua-coins still serves
+    # yesterday's column, the quote lands on yesterday's date and any
+    # figure we banked for it before the site settled gets corrected.
+    # What this cannot reach is a day older than the header ever goes
+    # back to -- that needs the coin's history refetched, which is
+    # --step fetch-prices, not this step.
+    updated_by_item = refresh_recent(conn, refresh_window_start())
     for report in reports:
         if report.status != "quoted":
             continue
         report.inserted = inserted_by_item.get(report.item_id, 0)
-        report.duplicates = 1 - report.inserted
+        report.updated = updated_by_item.get(report.item_id, 0)
+        report.duplicates = 1 - report.inserted - report.updated
 
 
 def update_prices(
@@ -688,7 +704,7 @@ def update_prices(
             summary.committed = True
         except Exception as exc:
             for report in reports:
-                report.inserted = report.duplicates = 0
+                report.inserted = report.updated = report.duplicates = 0
             summary.error = f"writing snapshots: {type(exc).__name__}: {exc}"
             summary.print_report()
             return summary

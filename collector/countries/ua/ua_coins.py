@@ -27,7 +27,6 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from collector.core.pacing import Pacer
-from collector.countries.ua.nbu_client import USER_AGENT
 from collector.countries.ua.normalize import normalize_match, split_packaging
 from collector.countries.ua.parsing import _parse_float, to_decimal
 
@@ -227,7 +226,7 @@ def parse_year(html: str, year: int) -> list[UaCoinsRow]:
 # per coin, in a column whose header names the day it was taken:
 # "Вартість 08.09.2026". That header is the only date this adapter will
 # put on such a quote. ua-coins recomputes the column on its own
-# schedule, so a run at 03:15 routinely sees yesterday's number -- and
+# schedule, so a morning run can still see yesterday's number -- and
 # stamping it with today's date would invent a price point that nobody
 # quoted. See update_prices.py, which is the whole reason this exists:
 # one cheap page per year against one signed request per coin.

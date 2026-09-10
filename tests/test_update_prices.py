@@ -297,8 +297,8 @@ def test_summary_line_counts_every_bucket():
         ],
     )
     assert summary.summary_line() == (
-        "update-prices ok series=1 scope=6 years=3 matched=3 inserted=2 dup=1 "
-        "no_quote=2 no_link=1 errors=0"
+        "update-prices ok series=1 scope=6 years=3 matched=3 inserted=2 corrected=0 "
+        "dup=1 no_quote=2 no_link=1 errors=0"
     )
     assert summary.exit_code == up.EXIT_OK
 
@@ -310,7 +310,7 @@ def test_scope_is_the_sum_of_the_three_buckets_and_matched_is_ins_plus_dup():
         coins=[_report("quoted", inserted=1), _report("no_quote:no_data"), _report("no_link")],
     )
     assert summary.no_link + summary.no_quote + summary.matched == summary.scope
-    assert summary.inserted + summary.duplicates == summary.matched
+    assert summary.inserted + summary.updated + summary.duplicates == summary.matched
 
 
 def test_a_night_with_nothing_new_is_still_ok():
@@ -340,8 +340,8 @@ def test_no_database_is_nothing_done_and_still_prints_the_line():
     summary = _summary(series=[], error="DATABASE_URL is not set")
     assert summary.exit_code == up.EXIT_NOTHING_DONE
     assert summary.summary_line() == (
-        "update-prices failed series=0 scope=0 years=0 matched=0 inserted=0 dup=0 "
-        "no_quote=0 no_link=0 errors=1"
+        "update-prices failed series=0 scope=0 years=0 matched=0 inserted=0 "
+        "corrected=0 dup=0 no_quote=0 no_link=0 errors=1"
     )
 
 

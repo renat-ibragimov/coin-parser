@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -50,6 +50,19 @@ SOURCE = "UA-Coins"
 UCOIN_SOURCE = "uCoin"
 CURRENCY = "UAH"
 GRADE = None  # ua-coins quotes one price per coin, ungraded
+
+# ua-coins does not settle a day's quote when the day starts: it
+# recomputes during the day, and it revises days already closed (seen:
+# nbu:418 on 2026-09-04, 299 when we read it, 295 a week later). One
+# snapshot per date with no way back would keep whichever number we
+# happened to read first, so the last REFRESH_WINDOW_DAYS days stay
+# open to correction -- a row inside the window whose price no longer
+# matches the source is updated in place, keeping its id and its date.
+# Older rows are never touched: past that horizon a difference is far
+# more likely to be a bad scrape than a revision, and a silent rewrite
+# of ten years of history is not something a nightly job should be able
+# to do.
+REFRESH_WINDOW_DAYS = 7
 
 REQUIRED_COLUMNS = [
     "catalog_item_id",
@@ -202,6 +215,7 @@ class PriceCoinReport:
     date_min: str | None = None
     date_max: str | None = None
     inserted: int = 0
+    updated: int = 0
     duplicates: int = 0
     ucoin_present: int = 0
     ucoin_dropped: int = 0
@@ -234,7 +248,8 @@ class LoadPricesSummary:
         if self.coins:
             print(
                 f"[load-prices]   {'source_id':<10} {'ua_coins':<9} {'status':<24} "
-                f"{'points':>7} {'date range':<25} {'ins':>7} {'dup':>7} {'uCoin':>7}"
+                f"{'points':>7} {'date range':<25} {'ins':>7} {'upd':>7} {'dup':>7} "
+                f"{'uCoin':>7}"
             )
         for c in self.coins:
             span = f"{c.date_min} .. {c.date_max}" if c.date_min else ""
@@ -246,7 +261,8 @@ class LoadPricesSummary:
                 ucoin = ""
             print(
                 f"[load-prices]   {c.source_id:<10} {c.ua_coins_id:<9} {c.status:<24} "
-                f"{c.points:>7} {span:<25} {c.inserted:>7} {c.duplicates:>7} {ucoin:>7}"
+                f"{c.points:>7} {span:<25} {c.inserted:>7} {c.updated:>7} "
+                f"{c.duplicates:>7} {ucoin:>7}"
             )
             if c.note:
                 print(f"[load-prices]     {c.note}")
@@ -259,12 +275,16 @@ class LoadPricesSummary:
         no_file = sum(1 for c in self.coins if c.status == "skipped:no_prices_file")
         anomalies = sum(1 for c in self.coins if c.status == "anomaly")
         inserted = sum(c.inserted for c in self.coins)
+        updated = sum(c.updated for c in self.coins)
         duplicates = sum(c.duplicates for c in self.coins)
         print(
             f"[load-prices] coins: loaded {loaded}, skipped:not_in_db {not_in_db}, "
             f"skipped:no_prices_file {no_file}, anomalies {anomalies}"
         )
-        print(f"[load-prices] points: inserted {inserted}, already present {duplicates}")
+        print(
+            f"[load-prices] points: inserted {inserted}, corrected {updated}, "
+            f"already present {duplicates}"
+        )
 
         ucoin_dropped = sum(c.ucoin_dropped for c in self.coins)
         ucoin_present = sum(c.ucoin_present for c in self.coins)
@@ -292,8 +312,8 @@ class LoadPricesSummary:
         if self.committed:
             print(
                 "[load-prices] committed. Rerun with no new fetch -- it should report "
-                "inserted 0, already present "
-                f"{inserted + duplicates}."
+                "inserted 0, corrected 0, already present "
+                f"{inserted + updated + duplicates}."
             )
 
 
@@ -389,6 +409,61 @@ def copy_rows(conn: psycopg.Connection, rows: list[tuple]) -> None:
                 copy.write_row((*head, Jsonb(raw_payload)))
 
 
+def refresh_window_start(today: date | None = None) -> datetime:
+    """Midnight UTC of the oldest day still open to correction.
+
+    REFRESH_WINDOW_DAYS counts calendar days including today, so a window
+    of 7 run on the 10th reaches back to the 4th.
+    """
+    day = today or datetime.now(timezone.utc).date()
+    return datetime.combine(
+        day - timedelta(days=REFRESH_WINDOW_DAYS - 1), time.min, tzinfo=timezone.utc
+    )
+
+
+def refresh_recent(
+    conn: psycopg.Connection, window_start: datetime
+) -> dict[int, int]:
+    """Correct the rows inside the window whose price the source has since
+    changed; returns {catalog_item_id: rows updated}.
+
+    Only our own rows move: created_by IS NULL keeps a collector's
+    hand-entered snapshot theirs, the same boundary _drop_ucoin draws.
+    The row keeps its id and observed_at, so nothing downstream that
+    points at a snapshot loses its target -- only the number it carries
+    and the payload it came from are rewritten.
+
+    Matching is on the same four columns the insert de-duplicates on, so
+    a row this updates is exactly a row the insert would have skipped.
+    """
+    rows = conn.execute(
+        f"""
+        UPDATE {TABLE} m
+        SET price = t.price,
+            source_url = t.source_url,
+            raw_payload = t.raw_payload
+        FROM (
+            SELECT DISTINCT ON (catalog_item_id, source, grade, observed_at) *
+            FROM {TMP_TABLE}
+            ORDER BY catalog_item_id, source, grade, observed_at
+        ) t
+        WHERE m.catalog_item_id = t.catalog_item_id
+          AND m.source = t.source
+          AND m.grade IS NOT DISTINCT FROM t.grade
+          AND m.observed_at = t.observed_at
+          AND m.observed_at >= %(window_start)s
+          AND m.created_by IS NULL
+          AND m.price IS DISTINCT FROM t.price
+        RETURNING m.catalog_item_id
+        """,
+        {"window_start": window_start},
+    ).fetchall()
+    updated: dict[int, int] = {}
+    for (item_id,) in rows:
+        updated[item_id] = updated.get(item_id, 0) + 1
+    return updated
+
+
 def insert_from_tmp(conn: psycopg.Connection, has_is_suspect: bool) -> dict[int, int]:
     """Move the staged rows into the real table; returns
     {catalog_item_id: rows actually inserted}.
@@ -407,6 +482,10 @@ def insert_from_tmp(conn: psycopg.Connection, has_is_suspect: bool) -> dict[int,
     constraint DOES cover (a non-NULL grade arriving from some future
     source), and DISTINCT ON collapses duplicates inside the batch
     itself, which NOT EXISTS cannot see.
+
+    A skipped row is not necessarily an unchanged one: the price is not
+    part of the key. refresh_recent() is what revisits the recent ones,
+    and it must run against the same staged batch.
     """
     extra_cols = ", is_suspect" if has_is_suspect else ""
     extra_vals = ", false" if has_is_suspect else ""
@@ -547,9 +626,18 @@ def _run_transaction(
     inserted_by_item = insert_from_tmp(conn, has_is_suspect)
     print(f"[load-prices] inserted {sum(inserted_by_item.values())} new row(s)")
 
+    window_start = refresh_window_start()
+    updated_by_item = refresh_recent(conn, window_start)
+    print(
+        f"[load-prices] corrected {sum(updated_by_item.values())} row(s) "
+        f"inside the {REFRESH_WINDOW_DAYS}-day window "
+        f"(from {window_start.date()}) where ua-coins has changed its quote"
+    )
+
     for report, item_id in loadable:
         report.inserted = inserted_by_item.get(item_id, 0)
-        report.duplicates = report.points - report.inserted
+        report.updated = updated_by_item.get(item_id, 0)
+        report.duplicates = report.points - report.inserted - report.updated
 
     _handle_ucoin(conn, loadable, summary)
 
