@@ -62,6 +62,12 @@ QUALITY: dict[str, list[str]] = {
     "proof_like": ["пруф-лайк"],
     "uncirculated": ["звичайна", "анциркулейтед"],
     "special_uncirculated": ["спеціальний анциркулейтед"],
+    # Its own tier, not a spelling of special_uncirculated: NBU's own
+    # English pages for these cards (nbu:133, nbu:138, "Найменша золота
+    # монета") say "improved" where the special_uncirculated ones say
+    # "special uncirculated" -- two different labels for the same cards'
+    # sibling denominations, so two different codes.
+    "improved": ["підвищена"],
 }
 
 EDGE: dict[str, list[str]] = {
