@@ -275,11 +275,22 @@ def normalize_match(s: str) -> str:
     comparison only -- NOT for display. Applies fix_homoglyphs, folds
     every apostrophe look-alike inside a word to one canonical character,
     drops quote marks -- an apostrophe look-alike used as one included --
-    and collapses whitespace. Two strings that differ only in which
-    apostrophe character, which script a look-alike letter is in, or
-    whether a name is quoted compare equal after this.
+    collapses whitespace, and case-folds. Two strings that differ only in
+    which apostrophe character, which script a look-alike letter is in,
+    whether a name is quoted, or letter case compare equal after this --
+    NBU and ua-coins don't agree on capitalization inside a title either
+    (nbu:1190 "XV літні Паралімпійські ігри" vs ua-coins' "XV Літні
+    Паралімпійські ігри", "Спорт" -- same coin, different case on one
+    word, which used to fail the exact-match rule outright and land the
+    card in unmatched.json with the right candidate sitting right there
+    in candidates_seen).
+
+    Case-folding runs last, after fix_homoglyphs: that step's lookup
+    table is keyed on the Latin/Cyrillic letter as NBU actually cased it
+    ("i" -> "і" but "I" -> "І"), so folding case first would make an
+    "I" indistinguishable from "i" and pick the wrong replacement.
     """
     text = _fold_apostrophes(fix_homoglyphs(s))
     for ch in _MATCH_DROP_CHARS:
         text = text.replace(ch, "")
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip().casefold()

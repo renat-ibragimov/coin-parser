@@ -235,17 +235,26 @@ def test_the_apostrophe_inside_the_wrapped_name_survives_the_wrapper_going():
     # The rule is positional, so both uses of ’ appear in this one title:
     # the outer pair goes, the one in Кожум’яка stays.
     wrapped = '’Кирило Кожум’яка’'
-    assert normalize_match(wrapped) == "Кирило Кожум’яка"
+    assert normalize_match(wrapped) == "кирило кожум’яка"
 
 
 def test_normalize_match_keeps_an_apostrophe_at_a_word_boundary_of_neither_kind():
     # An apostrophe only reads as a letter between two of them: "Кожум’яка"
     # keeps it, a trailing one is punctuation and goes.
-    assert normalize_match("Кожум’яка") == "Кожум’яка"
-    assert normalize_match("Кожумяка’") == "Кожумяка"
+    assert normalize_match("Кожум’яка") == "кожум’яка"
+    assert normalize_match("Кожумяка’") == "кожумяка"
 
 
 def test_normalize_match_still_folds_the_english_possessive():
     # CHILDREN’S ZODIAC -- letters both sides, so it is an apostrophe.
     assert normalize_match("CHILDREN'S ZODIAC") == normalize_match("CHILDREN’S ZODIAC")
     assert "’" in normalize_match("CHILDREN'S ZODIAC")
+
+
+def test_normalize_match_folds_case():
+    # nbu:1190 "Спорт": NBU writes "XV літні Паралімпійські ігри", the
+    # matching ua-coins row is titled "XV Літні Паралімпійські ігри" --
+    # same coin, different case on one word only.
+    a = "XV літні Паралімпійські ігри. Ріо-де-Жанейро"
+    b = "XV Літні Паралімпійські ігри. Ріо-де-Жанейро"
+    assert normalize_match(a) == normalize_match(b)
