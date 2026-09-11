@@ -7,14 +7,17 @@ import re
 _QUOTE_CHARS = "«»\"'`‘’“”"
 
 # One letter for every material but bimetallic (н нейзильбер, с/c срібло, з
-# золото, м мельхіор) -- NBU spells that one out as "бн" instead, apparently
+# золото, м мельхіор) -- NBU spells the two bimetallic variants out as
+# multi-letter codes instead: "бн" (base-metal bimetallic), apparently
 # because a bare "б" would be one edit away from "в" and "н" is already
-# taken. "бн" is matched as its own literal alternative rather than folded
-# into a generic 1-2-letter rule: a closed list of known codes can't
-# accidentally eat a real short parenthetical (nbu:1520's title is "Рік
-# Кота (Кролика)" -- an alternate name, not a material tag, and "Кролика"
-# only escapes this by being longer than two letters).
-_METAL_SUFFIX_RE = re.compile(r"\s*\((бн|[a-zA-Zа-яА-ЯіІїЇєЄ])\)\s*$")
+# taken, and "зс" (gold+silver bimetallic, see vocab.py's
+# "bimetallic_precious" -- nbu:97/98/99/107/110, "Пам'ятки давніх культур
+# України"). Both are matched as their own literal alternatives rather
+# than folded into a generic 1-2-letter rule: a closed list of known
+# codes can't accidentally eat a real short parenthetical (nbu:1520's
+# title is "Рік Кота (Кролика)" -- an alternate name, not a material tag,
+# and "Кролика" only escapes this by being longer than two letters).
+_METAL_SUFFIX_RE = re.compile(r"\s*\((бн|зс|[a-zA-Zа-яА-ЯіІїЇєЄ])\)\s*$")
 
 # NBU sometimes renders the metal-suffix letter in Latin script instead of
 # Cyrillic (observed: "срібло" suffixed as "(c)" with a Latin c instead of
@@ -27,6 +30,7 @@ _SUFFIX_CANON = {
     "з": "з",  # золото
     "м": "м",  # мельхіор
     "бн": "бн",  # bimetallic ("біметалеві із недорогоцінних металів")
+    "зс": "зс",  # bimetallic ("біметалеві із дорогоцінних металів", gold+silver)
 }
 
 # Cyrillic/Latin homoglyph pairs that NBU text is known to mix up, mid-word

@@ -40,9 +40,14 @@ MATERIALS: dict[str, list[str]] = {
     "cupronickel": ["мельхіор"],
     # NBU spells this out in full on some series ("Відродження
     # української державності", nbu:236) instead of the short "біметал"
-    # seen elsewhere -- same material, "made of base metals" being the
-    # only bimetallic option NBU uses (never precious-metal bimetallic).
+    # seen elsewhere -- same material, "made of base metals".
     "bimetallic": ["біметал", "біметалеві із недорогоцінних металів"],
+    # Turns out base metals isn't the only bimetallic NBU has ("Пам'ятки
+    # давніх культур України", nbu:97/98/99/107/110, title suffix "(зс)"
+    # -- gold+silver): a precious-metal bimetallic coin is a different
+    # material composition (and price bracket) from the base-metal one
+    # above, so its own code rather than folding it in.
+    "bimetallic_precious": ["біметалеві із дорогоцінних металів"],
     # NBU's cheap commemorative metal since 2018 ("zinc-based alloy" on
     # its own English pages), and its own code for the same reason
     # мельхіор is: нейзильбер is copper-nickel-zinc, and calling a
@@ -78,6 +83,12 @@ EDGE: dict[str, list[str]] = {
         "гладкий із заглибленими написами",
     ],
     "sector_reeded": ["секторальне рифлення"],
+    # NBU's own label for multi-coin set cards ("Набір із двох пам'ятних
+    # монет ...", nbu:1594, "Пам'ятки архітектури України") where a
+    # single edge description doesn't apply -- not the first set card to
+    # carry it, so its own code rather than a guess at which real edge it
+    # means.
+    "not_specified": ["<не вказується>"],
 }
 
 UNIT: dict[str, list[str]] = {

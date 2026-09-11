@@ -176,9 +176,11 @@ REQUIRED_COLUMNS = {
     DENOMINATIONS_TABLE: ["id", "country_id", "currency_code", "value", "unit", "sort_order"],
 }
 
-# Gold and silver are the precious ones; nickel silver and bimetal are
-# not, whatever the "silver" in the name suggests.
-PRECIOUS_MATERIALS = frozenset({"gold", "silver"})
+# Gold and silver are the precious ones; nickel silver and base-metal
+# bimetal are not, whatever the "silver" in the name suggests.
+# bimetallic_precious is the gold+silver bimetallic variant (vocab.py),
+# so it belongs here too -- plain "bimetallic" (base metals) doesn't.
+PRECIOUS_MATERIALS = frozenset({"gold", "silver", "bimetallic_precious"})
 
 # unit -> (currency_code, what one unit is worth in the currency's
 # smallest unit). The second number is denominations.sort_order, computed
