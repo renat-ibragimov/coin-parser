@@ -305,6 +305,65 @@ def extract_current_price(page_html: str) -> tuple[CurrentPrice | None, list[Cur
     return (dated[0] if dated else (candidates[0] if candidates else None)), candidates
 
 
+# ua-coins shows this widget in place of a market price while a brand-new
+# coin has no confirmed resale yet:
+#
+#   <div class="market-pending">
+#     <div class="market-pending__lead">
+#       <span class="market-pending__price">7 836 грн</span>
+#       <span class="market-pending__price-label">офіційна ціна НБУ на 11.09.2026</span>
+#       <span class="market-pending__status">ринкова ціна ще не сформована</span>
+#     </div> ...
+#   </div>
+#
+# This is the mint's own issue price, not a market quote -- kept out of
+# extract_current_price() on purpose, so a caller has to ask for it by
+# name rather than get it back silently mixed in with real ua-coins
+# prices (see load_prices.py's NBU_ISSUE_SOURCE).
+_NBU_PENDING_SELECTOR = ".market-pending"
+_NBU_PENDING_PRICE_SELECTOR = ".market-pending__price"
+_NBU_PENDING_LABEL_SELECTOR = ".market-pending__price-label"
+
+
+def extract_nbu_issue_price(page_html: str) -> CurrentPrice | None:
+    """The NBU's own issue price for a coin ua-coins has not priced yet.
+
+    Read only from the market-pending widget's own markup -- never the
+    generic "<number> грн" scan extract_current_price() falls back to,
+    because this page always has at least one OTHER "<number> грн" on
+    it (the face value in the h1) that a blind scan cannot tell apart
+    from the real thing. ua-coins stops rendering the widget the moment
+    a real market price exists, so its mere presence is the signal.
+    """
+    tree = HTMLParser(page_html)
+    block = tree.css_first(_NBU_PENDING_SELECTOR)
+    if block is None:
+        return None
+    price_node = block.css_first(_NBU_PENDING_PRICE_SELECTOR)
+    if price_node is None:
+        return None
+    # This widget spaces its thousands with a thin space (U+2009), not
+    # the  /  the rest of the site's price text uses -- folded
+    # to a plain space here rather than in the shared _PRICE_TEXT_RE,
+    # which every other price reading on the page still has to match
+    # as the site actually writes it.
+    price_text = (price_node.text() or "").replace(" ", " ")
+    m = _PRICE_TEXT_RE.search(price_text)
+    if m is None:
+        return None
+    price = to_decimal(m.group(1))
+    if price is None or price <= 0:
+        return None
+    label_node = block.css_first(_NBU_PENDING_LABEL_SELECTOR)
+    label_text = (label_node.text() if label_node else "") or ""
+    return CurrentPrice(
+        price=price,
+        date=_find_date(label_text),
+        text=" ".join(label_text.split())[:200] or price_text.strip(),
+        found_by="nbu-issue-pending",
+    )
+
+
 # ---------------------------------------------------------------------- #
 # the chart response itself (pure)
 # ---------------------------------------------------------------------- #
@@ -520,10 +579,52 @@ def _fetch_one(
 
     endpoint = extract_prices_url(page_html, coin_id)
     if endpoint is None:
-        raise RuntimeError(
-            f"no /coin/prices/ link in the coin page (saved at {saved_page}) -- "
-            "ua-coins may have changed its markup"
+        # A brand-new coin has no chart at all yet -- ua-coins does not
+        # even embed the /coin/prices/ link until there is a first point
+        # to plot -- and that is not the markup-changed error below, it
+        # is the market-pending widget's whole reason to exist. Anything
+        # else missing the link (an old coin, a real markup change) has
+        # neither the link nor the widget, so it still raises.
+        nbu_issue = extract_nbu_issue_price(page_html)
+        if nbu_issue is None:
+            raise RuntimeError(
+                f"no /coin/prices/ link in the coin page (saved at {saved_page}) -- "
+                "ua-coins may have changed its markup"
+            )
+        prices_dir(staging_root).mkdir(parents=True, exist_ok=True)
+        prices_path(staging_root, source_id).write_text("[]", encoding="utf-8")
+        meta = {
+            "ua_coins_id": coin_id,
+            "source_id": source_id,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "page_url": page_url,
+            "prices_url_used": None,
+            "points": 0,
+            "date_min": None,
+            "date_max": None,
+            "price_min": None,
+            "price_max": None,
+            "series_error": None,
+            "current_price": None,
+            "current_price_check": "no chart yet",
+            "current_price_candidates": [],
+            "nbu_issue_price": {
+                "price": str(nbu_issue.price),
+                "date": nbu_issue.date.isoformat() if nbu_issue.date else None,
+                "text": nbu_issue.text,
+            },
+        }
+        meta_path(staging_root, source_id).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        result.status = "fetched"
+        result.points = 0
+        result.note = (
+            f"no chart yet -- NBU issue price {nbu_issue.price} грн "
+            f"({nbu_issue.date.isoformat() if nbu_issue.date else '?'}) recorded instead"
+        )
+        print(f"[fetch-prices]     {result.note}")
+        return
     if endpoint.coin_id != coin_id:
         result.warnings.append(
             f"chart link on the page is for coin {endpoint.coin_id}, not {coin_id} -- using it anyway"
@@ -585,6 +686,13 @@ def _fetch_one(
     if warning:
         result.warnings.append(warning)
 
+    # Only meaningful while the chart is empty -- ua-coins stops
+    # rendering the widget the moment a real market price exists, so
+    # this is None on every coin that already has history. Recorded
+    # unconditionally anyway: load-prices is the one that decides
+    # whether to use it, not this step.
+    nbu_issue = extract_nbu_issue_price(page_html)
+
     meta = {
         "ua_coins_id": coin_id,
         "source_id": source_id,
@@ -614,6 +722,15 @@ def _fetch_one(
             }
             for c in candidates[:10]
         ],
+        "nbu_issue_price": (
+            {
+                "price": str(nbu_issue.price),
+                "date": nbu_issue.date.isoformat() if nbu_issue.date else None,
+                "text": nbu_issue.text,
+            }
+            if nbu_issue
+            else None
+        ),
     }
     meta_path(staging_root, source_id).write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -648,10 +765,15 @@ def _recheck_cached_control_point(
     if not saved_page.exists():
         return "no saved page"
 
-    current, candidates = extract_current_price(saved_page.read_text(encoding="utf-8"))
+    page_html = saved_page.read_text(encoding="utf-8")
+    current, candidates = extract_current_price(page_html)
     verdict, warning = check_control_point(points, current)
     if warning:
         result.warnings.append(warning)
+    # Same page, already on disk -- refreshed alongside the control
+    # point rather than left stale until a --refresh-prices, the same
+    # reasoning this function's docstring gives for current_price.
+    nbu_issue = extract_nbu_issue_price(page_html)
 
     if meta_file.exists():
         try:
@@ -678,6 +800,15 @@ def _recheck_cached_control_point(
             for c in candidates[:10]
         ]
         meta["current_price_rechecked_at"] = datetime.now(timezone.utc).isoformat()
+        meta["nbu_issue_price"] = (
+            {
+                "price": str(nbu_issue.price),
+                "date": nbu_issue.date.isoformat() if nbu_issue.date else None,
+                "text": nbu_issue.text,
+            }
+            if nbu_issue
+            else None
+        )
         meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return verdict
 

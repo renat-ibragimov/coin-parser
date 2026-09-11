@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import psycopg
@@ -38,6 +39,7 @@ from collector.countries.ua.prices import (
     PricePoint,
     PriceSeriesAnomaly,
     load_price_file,
+    meta_path,
     prices_path,
 )
 
@@ -49,6 +51,14 @@ SOURCE = "UA-Coins"
 # storefront's "latest snapshot" pick and show as the coin's price. They
 # are dropped per series, never catalogue-wide -- see _drop_ucoin.
 UCOIN_SOURCE = "uCoin"
+# A brand-new coin's own fallback: while ua-coins has no confirmed resale
+# yet, its coin page shows the NBU's own issue price instead of a market
+# quote (see prices.extract_nbu_issue_price). That number is the mint's
+# price, not a trade, so it gets its own source rather than being folded
+# into SOURCE -- conflating the two would misrepresent every point under
+# it as a real market observation, and a later real quote for the same
+# coin lands on its own date next to this one, never overwriting it.
+NBU_ISSUE_SOURCE = "NBU-issue"
 CURRENCY = "UAH"
 GRADE = None  # ua-coins quotes one price per coin, ungraded
 
@@ -213,6 +223,61 @@ def build_copy_rows(
         )
         for p in points
     ]
+
+
+@dataclass
+class NbuIssuePrice:
+    price: Decimal
+    day: date
+    text: str
+
+
+def read_nbu_issue_price(staging_root: Path, source_id: str) -> NbuIssuePrice | None:
+    """fetch-prices' record of the coin page's market-pending widget
+    (meta.json's nbu_issue_price), or None if there was none -- the coin
+    already has a real quote, ua-coins never showed one, or the meta
+    predates this field (a cached run before --refresh-prices).
+
+    Read straight off disk: fetch-prices already parsed the page, and
+    this step does no network of its own (see the module docstring).
+    """
+    path = meta_path(staging_root, source_id)
+    if not path.exists():
+        return None
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    entry = meta.get("nbu_issue_price")
+    if not entry or not entry.get("date"):
+        return None
+    try:
+        day = date.fromisoformat(entry["date"])
+        price = Decimal(str(entry["price"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return None
+    if price <= 0:
+        return None
+    return NbuIssuePrice(price=price, day=day, text=entry.get("text") or "")
+
+
+def build_nbu_issue_row(catalog_item_id: int, issue: NbuIssuePrice, source_url: str) -> tuple:
+    """The one synthetic row for a coin ua-coins has not priced yet --
+    same shape as build_copy_rows(), but under NBU_ISSUE_SOURCE and with
+    raw_payload recording where the number actually came from, so a
+    later reader is never left guessing why one point differs in kind
+    from the rest of a coin's history.
+    """
+    return (
+        catalog_item_id,
+        NBU_ISSUE_SOURCE,
+        GRADE,
+        issue.price,
+        CURRENCY,
+        datetime.combine(issue.day, time.min, tzinfo=timezone.utc),
+        source_url,
+        {"kind": "nbu_issue_price", "text": issue.text},
+    )
 
 
 # ---------------------------------------------------------------------- #
@@ -542,7 +607,10 @@ def insert_from_tmp(conn: psycopg.Connection, has_is_suspect: bool) -> dict[int,
 
 def _collect(
     staging_root: Path, series_slug: str | None, summary: LoadPricesSummary
-) -> tuple[list[tuple[CardRef, list[PricePoint], PriceCoinReport]], list[PriceCoinReport]]:
+) -> tuple[
+    list[tuple[CardRef, list[PricePoint], NbuIssuePrice | None, PriceCoinReport]],
+    list[PriceCoinReport],
+]:
     """Read and validate everything on disk before opening a connection.
     A bad file should never leave a half-open transaction behind."""
     index, warnings = build_card_index(staging_root, series_slug)
@@ -552,7 +620,7 @@ def _collect(
     shared_note = f" ({extra} of them sharing a declared listing)" if extra else ""
     print(f"[load-prices] {cards_in_index} matched card(s) in staging{shared_note}")
 
-    ready: list[tuple[CardRef, list[PricePoint], PriceCoinReport]] = []
+    ready: list[tuple[CardRef, list[PricePoint], NbuIssuePrice | None, PriceCoinReport]] = []
     early: list[PriceCoinReport] = []
 
     for coin_id, ref in ((cid, r) for cid in sorted(index) for r in index[cid]):
@@ -575,22 +643,35 @@ def _collect(
             print(f"[load-prices]   {ref.source_id} (ua-coins {coin_id}): ANOMALY -- {exc}")
             continue
 
-        report.points = len(points)
+        nbu_issue = None if points else read_nbu_issue_price(staging_root, ref.source_id)
+
+        report.points = len(points) + (1 if nbu_issue else 0)
         if points:
             report.date_min = points[0].day.isoformat()
             report.date_max = points[-1].day.isoformat()
+        elif nbu_issue:
+            report.date_min = report.date_max = nbu_issue.day.isoformat()
+            report.note = (
+                f"no ua-coins market history yet -- wrote the NBU's own issue "
+                f"price ({nbu_issue.price} грн) from the coin page instead"
+            )
         print(
             f"[load-prices]   {ref.source_id} (ua-coins {coin_id}): {len(points)} point(s) "
             f"{report.date_min}..{report.date_max}"
         )
-        ready.append((ref, points, report))
+        if nbu_issue:
+            print(
+                f"[load-prices]     no market history yet -- using NBU issue price "
+                f"{nbu_issue.price} грн ({nbu_issue.day.isoformat()})"
+            )
+        ready.append((ref, points, nbu_issue, report))
 
     return ready, early
 
 
 def _run_transaction(
     conn: psycopg.Connection,
-    ready: list[tuple[CardRef, list[PricePoint], PriceCoinReport]],
+    ready: list[tuple[CardRef, list[PricePoint], NbuIssuePrice | None, PriceCoinReport]],
     summary: LoadPricesSummary,
 ) -> None:
     cols = existing_columns(conn, TABLE)
@@ -611,12 +692,12 @@ def _run_transaction(
 
     summary.rows_before = conn.execute(f"SELECT COUNT(*) FROM {TABLE}").fetchone()[0]
 
-    resolved = _resolve_catalog_items(conn, [ref.source_id for ref, _, _ in ready])
+    resolved = _resolve_catalog_items(conn, [ref.source_id for ref, _, _, _ in ready])
     print(f"[load-prices] {len(resolved)}/{len(ready)} coin(s) found in catalog_items")
 
     loadable: list[tuple[PriceCoinReport, int]] = []
     all_rows: list[tuple] = []
-    for ref, points, report in ready:
+    for ref, points, nbu_issue, report in ready:
         item_id = resolved.get(ref.source_id)
         if item_id is None:
             report.status = "skipped:not_in_db"
@@ -629,6 +710,8 @@ def _run_transaction(
         report.status = "loaded"
         loadable.append((report, item_id))
         all_rows.extend(build_copy_rows(item_id, points, ref.page_url))
+        if nbu_issue:
+            all_rows.append(build_nbu_issue_row(item_id, nbu_issue, ref.page_url))
         summary.coins.append(report)
 
     if not all_rows:

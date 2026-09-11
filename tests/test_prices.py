@@ -29,6 +29,7 @@ from collector.countries.ua.prices import (
     prices_path,
     check_control_point,
     extract_current_price,
+    extract_nbu_issue_price,
     extract_prices_url,
     parse_price_series,
 )
@@ -284,6 +285,60 @@ def test_extract_current_price_still_lists_scan_candidates_for_the_meta_file():
     assert any(c.price == Decimal("568") for c in candidates)
 
 
+# ---------------------------------------------------------------------- #
+# the NBU's own issue price -- market-pending widget
+# ---------------------------------------------------------------------- #
+
+
+# The markup ua-coins actually serves for a brand-new coin with no
+# confirmed resale yet (copied off list/3052, "До 30-річчя грошової
+# реформи в Україні"): thousands separated by a thin space (&thinsp;,
+# U+2009), not the plain/nbsp separator every other price on the site
+# uses.
+_PENDING_WIDGET = """
+<div class="market-pending" aria-live="polite">
+  <div class="market-pending__lead">
+    <span class="market-pending__price">7&thinsp;836&nbsp;грн</span>
+    <span class="market-pending__price-label">офіційна ціна НБУ на 11.09.2026</span>
+    <span class="market-pending__status">ринкова ціна ще не сформована</span>
+  </div>
+  <p class="market-pending__hint">Підтверджених продажів поки немає.</p>
+</div>
+"""
+
+
+def test_extract_nbu_issue_price_reads_the_pending_widget():
+    html = _coin_page(REAL_NOTE).replace("</body>", _PENDING_WIDGET + "</body>")
+    found = extract_nbu_issue_price(html)
+    assert found.price == Decimal("7836")
+    assert found.date == date(2026, 9, 11)
+    assert found.found_by == "nbu-issue-pending"
+
+
+def test_extract_nbu_issue_price_handles_the_thin_space_thousands_separator():
+    # The whole point of the dedicated widget parser: _PRICE_TEXT_RE
+    # alone does not know U+2009 as a thousands separator.
+    found = extract_nbu_issue_price(f"<body>{_PENDING_WIDGET}</body>")
+    assert found.price == Decimal("7836")
+
+
+def test_extract_nbu_issue_price_is_none_without_the_widget():
+    # A normal page has its own "<number> грн" text everywhere (face
+    # value, the price note) -- none of it should be mistaken for this.
+    assert extract_nbu_issue_price(_coin_page(REAL_NOTE)) is None
+
+
+def test_extract_nbu_issue_price_is_none_when_the_price_span_is_missing():
+    broken = """
+    <div class="market-pending">
+      <div class="market-pending__lead">
+        <span class="market-pending__price-label">офіційна ціна НБУ на 11.09.2026</span>
+      </div>
+    </div>
+    """
+    assert extract_nbu_issue_price(f"<body>{broken}</body>") is None
+
+
 def test_check_control_point_ok_when_the_page_agrees_with_the_last_point():
     points = parse_price_series(_series(("2026-09-08", 560), ("2026-09-09", 568)))
     best, _ = extract_current_price(_coin_page(REAL_NOTE))
@@ -366,6 +421,58 @@ def test_build_copy_rows_uses_the_coin_page_not_the_signed_chart_url():
 
 def test_build_copy_rows_of_an_empty_history_is_empty():
     assert build_copy_rows(1, [], PAGE_URL) == []
+
+
+# ---------------------------------------------------------------------- #
+# read_nbu_issue_price / build_nbu_issue_row
+# ---------------------------------------------------------------------- #
+
+
+def _write_issue_price_meta(tmp_path, source_id, nbu_issue_price):
+    meta_path(tmp_path, source_id).parent.mkdir(parents=True, exist_ok=True)
+    meta_path(tmp_path, source_id).write_text(
+        __import__("json").dumps({"nbu_issue_price": nbu_issue_price}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def test_read_nbu_issue_price_reads_a_recorded_entry(tmp_path):
+    _write_issue_price_meta(
+        tmp_path, "nbu:3052",
+        {"price": "7836", "date": "2026-09-11", "text": "офіційна ціна НБУ на 11.09.2026"},
+    )
+    found = load_prices_mod.read_nbu_issue_price(tmp_path, "nbu:3052")
+    assert found.price == Decimal("7836")
+    assert found.day == date(2026, 9, 11)
+
+
+def test_read_nbu_issue_price_is_none_without_a_meta_file(tmp_path):
+    assert load_prices_mod.read_nbu_issue_price(tmp_path, "nbu:3052") is None
+
+
+def test_read_nbu_issue_price_is_none_when_the_field_is_null(tmp_path):
+    # The common case: the coin already has a real quote, or never had
+    # a market-pending widget to begin with.
+    _write_issue_price_meta(tmp_path, "nbu:88", None)
+    assert load_prices_mod.read_nbu_issue_price(tmp_path, "nbu:88") is None
+
+
+def test_read_nbu_issue_price_is_none_on_a_malformed_date(tmp_path):
+    _write_issue_price_meta(tmp_path, "nbu:3052", {"price": "7836", "date": "not-a-date", "text": ""})
+    assert load_prices_mod.read_nbu_issue_price(tmp_path, "nbu:3052") is None
+
+
+def test_build_nbu_issue_row_uses_its_own_source_not_ua_coins():
+    from collector.countries.ua.load_prices import NBU_ISSUE_SOURCE, NbuIssuePrice
+
+    row = load_prices_mod.build_nbu_issue_row(
+        1, NbuIssuePrice(price=Decimal("7836"), day=date(2026, 9, 11), text="x"), PAGE_URL
+    )
+    assert row[1] == NBU_ISSUE_SOURCE
+    assert NBU_ISSUE_SOURCE != SOURCE
+    assert row[3] == Decimal("7836")
+    assert row[5] == datetime(2026, 9, 11, tzinfo=timezone.utc)
+    assert row[6] == PAGE_URL
 
 
 # ---------------------------------------------------------------------- #
