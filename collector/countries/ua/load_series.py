@@ -74,18 +74,23 @@ def build_series_values(entry: dict, has_is_official: bool) -> dict:
     """
     names = entry.get("names", {})
     uk_name = (names.get("uk") or "").strip()
+    # A curated entry's names are our own made-up label, not text NBU
+    # itself displays (it has no serie[] name for these cards at all --
+    # see the fetch()/parse() notes) -- "official" as the source would
+    # misrepresent where the label came from.
+    name_source = "official" if entry.get("is_official") is not False else "manual"
 
     values: dict = {
         "name_original": uk_name,
         "name_uk": uk_name,
-        "name_uk_source": "official",
+        "name_uk_source": name_source,
         "original_lang": "uk",
     }
 
     en_name = names.get("en")
     if en_name is not None:
         values["name_en"] = en_name.strip()
-        values["name_en_source"] = "official"
+        values["name_en_source"] = name_source
 
     year_range = entry.get("year_range")
     if year_range:
@@ -93,7 +98,7 @@ def build_series_values(entry: dict, has_is_official: bool) -> dict:
         values["end_year"] = year_range[1]
 
     if has_is_official:
-        values["is_official"] = True
+        values["is_official"] = bool(entry.get("is_official", True))
 
     return values
 
@@ -233,7 +238,7 @@ def _execute_insert(conn: psycopg.Connection, values: dict) -> int:
 
 
 def _run_transaction(
-    conn: psycopg.Connection, official: list[dict], db_map: dict[str, int], summary: LoadSeriesSummary
+    conn: psycopg.Connection, entries: list[dict], db_map: dict[str, int], summary: LoadSeriesSummary
 ) -> bool:
     """Everything inside conn.transaction() -- commits on normal return,
     rolls back if it raises. Returns whether db_map was changed (new
@@ -253,7 +258,7 @@ def _run_transaction(
         select_columns.append("is_official")
 
     db_map_dirty = False
-    for entry in sorted(official, key=lambda e: e["slug"]):
+    for entry in sorted(entries, key=lambda e: e["slug"]):
         slug = entry["slug"]
 
         if entry.get("missing_from_nbu"):
@@ -305,7 +310,10 @@ def _run_transaction(
 
 def load_series(dsn: str | None = None) -> LoadSeriesSummary:
     series_data = json.loads(SERIES_JSON_PATH.read_text(encoding="utf-8"))
-    official = [e for e in series_data.get("series", []) if e.get("is_official")]
+    # Curated (is_official=false) entries load into coin_series the same
+    # as official ones -- they need a real coin_series.id too, for
+    # load-cards to resolve series_id against (see _resolve_series_id).
+    entries = list(series_data.get("series", []))
 
     db_map_data = load_db_map()
     db_map: dict[str, int] = db_map_data.get("series", {})
@@ -322,7 +330,7 @@ def load_series(dsn: str | None = None) -> LoadSeriesSummary:
     try:
         with psycopg.connect(dsn) as conn:
             with conn.transaction():
-                db_map_dirty = _run_transaction(conn, official, db_map, summary)
+                db_map_dirty = _run_transaction(conn, entries, db_map, summary)
             # conn.transaction() exited without raising -> committed.
     except Exception as exc:
         summary.error = str(exc)

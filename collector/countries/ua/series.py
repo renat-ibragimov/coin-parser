@@ -437,12 +437,19 @@ def load_series_json(path: Path = SERIES_JSON_PATH) -> dict | None:
 
 
 def find_official_series(data: dict | None, uk_name: str) -> dict | None:
-    """Look up an official series entry by names.uk, tolerant of
-    apostrophe-variant/homoglyph differences (normalize_match)."""
+    """Look up a series entry -- official (NBU-catalogued) or curated
+    (is_official=false, membership-based, see the schema note in
+    _validate_entry) -- by names.uk, tolerant of apostrophe-variant/
+    homoglyph differences (normalize_match). The name is kept despite
+    also matching curated entries: every caller uses it to resolve
+    `--series "<name>"` into its series.json entry regardless of which
+    kind it turns out to be, and a rename would touch call sites for no
+    behavioural gain.
+    """
     if not data:
         return None
     target = normalize_match(uk_name)
     for entry in data.get("series", []):
-        if entry.get("is_official") and normalize_match(entry.get("names", {}).get("uk", "")) == target:
+        if normalize_match(entry.get("names", {}).get("uk", "")) == target:
             return entry
     return None

@@ -220,7 +220,16 @@ class ParserUkraine:
 
         summary = FetchSummary(series=self.series)
 
-        query_by_locale = {"uk": entry["names"]["uk"]}
+        # A curated entry (is_official=false, see _validate_entry's schema
+        # note) has no serie[] value of its own to query by name -- its
+        # names.uk/en are just a display label we made up. Its membership
+        # is a fixed set of card ids (membership.card_ids), verified
+        # against what serie[]="" itself returns: NBU's own listing
+        # genuinely tags these specific cards with an empty series, so
+        # that empty string is the real, working query value, not a
+        # "fetch everything" fallback (see docs/01_findings.md).
+        is_curated = entry.get("is_official") is False
+        query_by_locale = {"uk": "" if is_curated else entry["names"]["uk"]}
         en_name = entry["names"].get("en")
         if en_name is None:
             summary.warnings.append(
@@ -229,7 +238,7 @@ class ParserUkraine:
                 "rerun --step series if that seems wrong) — skipping en fetch"
             )
         else:
-            query_by_locale["en"] = en_name
+            query_by_locale["en"] = "" if is_curated else en_name
 
         self.staging.ensure_dirs()
         fetched_at = datetime.now(timezone.utc).isoformat()
@@ -387,6 +396,32 @@ class ParserUkraine:
                         existing_ua_coins[old_card["source_id"]] = old_card["ua_coins"]
         for card in cards:
             card["ua_coins"] = existing_ua_coins.get(card["source_id"])
+
+        # A curated series' membership is a fixed card-id list, not
+        # something NBU's serie[] filter can express by name -- see
+        # fetch()'s own note. Filter the freshly-parsed cards down to
+        # exactly that list here, so a stray card sharing NBU's blank
+        # serie[] tag by accident doesn't silently ride along, and warn
+        # (rather than fail) on any mismatch -- membership drift is worth
+        # a human look, not a hard stop.
+        curated_entry = find_official_series(load_series_json(), self.series)
+        if curated_entry is not None and curated_entry.get("is_official") is False:
+            card_ids = (curated_entry.get("membership") or {}).get("card_ids") or []
+            wanted = {f"nbu:{cid}" for cid in card_ids}
+            fetched_ids = {c["source_id"] for c in cards}
+            extra = sorted(fetched_ids - wanted, key=lambda s: int(s.split(":")[1]))
+            missing = sorted(wanted - fetched_ids, key=lambda s: int(s.split(":")[1]))
+            if extra:
+                warnings.append(
+                    f"{len(extra)} card(s) fetched but not in this curated series' "
+                    f"membership.card_ids, dropped: {extra}"
+                )
+            if missing:
+                warnings.append(
+                    f"{len(missing)} card(s) in membership.card_ids were not found in "
+                    f"this fetch: {missing}"
+                )
+            cards = [c for c in cards if c["source_id"] in wanted]
 
         meta_path = self.staging.raw_dir / META_FILENAME
         series_dict = load_series_json()

@@ -55,6 +55,16 @@ MATERIALS: dict[str, list[str]] = {
     # when it is mostly zinc. NBU uses both labels in one series --
     # "Збройні сили України" has 14 of this against 11 нейзильбер.
     "zinc_alloy": ["сплав на основі цинку"],
+    # Seen only in "Сувенірна продукція без серії" (curated, no real
+    # NBU serie[] -- coin rolls, medal sets, and this: silver
+    # collector's banknotes NBU sells alongside its coins). Not a coin
+    # material at all, its own code so it doesn't get folded into a
+    # metal it isn't.
+    "banknote": ["інший (банкнота)"],
+    # Same curated bucket, on набір ("set") cards where NBU doesn't
+    # commit to one material for the whole bundle -- same shape as
+    # EDGE's own "not_specified" below, just on the material field.
+    "not_specified": ["не вказується (набір)"],
 }
 
 QUALITY: dict[str, list[str]] = {
@@ -73,6 +83,11 @@ QUALITY: dict[str, list[str]] = {
     # "special uncirculated" -- two different labels for the same cards'
     # sibling denominations, so two different codes.
     "improved": ["підвищена"],
+    # EN-locale mirror of EDGE's own "<не вказується>" placeholder (see
+    # below) -- NBU's set/banknote cards in "Сувенірна продукція без
+    # серії" carry this literal angle-bracket text as the quality mark
+    # in the en-locale page instead of a real value.
+    "not_specified": ["<not assigned>"],
 }
 
 EDGE: dict[str, list[str]] = {
