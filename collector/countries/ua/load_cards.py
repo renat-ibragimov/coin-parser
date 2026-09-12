@@ -71,7 +71,7 @@ COUNTRY_ID = 2
 LINK_SOURCE_NBU = "NBU"
 LINK_SOURCE_UA_COINS = "UA-Coins"
 
-MIGRATION_HINT = "run migration 0006 in coin_keeper (alembic upgrade head)"
+MIGRATION_HINT = "run the pending migration in coin_keeper (alembic upgrade head)"
 
 # Every column this step is allowed to write. Anything not here it does
 # not touch, on any run.
@@ -99,6 +99,11 @@ OWNED_COLUMNS = [
     "artists",
     "status",
     "source_key",
+    # Set by a second pass (_link_packaging_pairs), never by
+    # build_item_values/diff_row -- see there for why. Included here only
+    # so _select_item's column list (which is OWNED_COLUMNS) reads it back
+    # and the schema guard checks for it.
+    "packaging_of_id",
 ]
 
 # Written once, when the row is created, and never again: what group a
@@ -1033,7 +1038,53 @@ def _run_transaction(
         report.media_unchanged = unchanged
         summary.cards.append(report)
 
+    _link_packaging_pairs(conn, plans, summary)
+
     summary.rows_after = conn.execute(f"SELECT COUNT(*) FROM {TABLE}").fetchone()[0]
+
+
+def _link_packaging_pairs(
+    conn: psycopg.Connection, plans: list[CardPlan], summary: LoadCardsSummary
+) -> None:
+    """Second pass: set packaging_of_id now that every card in this batch
+    has a resolved catalog_items.id (see build_item_values -- it never
+    sets this column itself, on purpose).
+
+    A card's bare twin (card["packaging_of"], written by parser.py's
+    find_packaging_pairs) is not guaranteed to come first in `plans`: real
+    data has a packaged card sorting before its own bare twin (nbu:1454
+    before nbu:1455). It can also not be in this batch at all -- a series
+    re-collected after NBU adds a packaged sibling to an already-loaded
+    theme finds its bare twin only in the database, not in `plans`.
+    """
+    id_by_source = {r.source_id: r.db_id for r in summary.cards if r.db_id}
+    reports_by_source = {r.source_id: r for r in summary.cards}
+
+    for plan in plans:
+        bare_source_id = plan.card.get("packaging_of")
+        if bare_source_id is None:
+            continue
+        report = reports_by_source[plan.card["source_id"]]
+
+        bare_id = id_by_source.get(bare_source_id)
+        if bare_id is None:
+            bare_row = _select_item(conn, bare_source_id)
+            bare_id = bare_row["id"] if bare_row else None
+        if bare_id is None:
+            summary.warnings.append(
+                f"{report.source_id}: packaging_of {bare_source_id} has no catalog_items "
+                "row yet -- its bare twin has not been loaded"
+            )
+            continue
+
+        current = _select_item(conn, report.source_id)
+        old_value = current["packaging_of_id"] if current else None
+        if old_value == bare_id:
+            continue
+        _execute_update(conn, report.db_id, {"packaging_of_id": bare_id})
+        report.changes["packaging_of_id"] = (old_value, bare_id)
+        if report.action == "unchanged":
+            report.action = "update"
 
 
 def load_cards(

@@ -42,6 +42,7 @@ from collector.countries.ua.nbu_client import (
 from collector.countries.ua.load_cards import load_cards
 from collector.countries.ua.load_prices import load_prices
 from collector.countries.ua.load_series import load_series
+from collector.countries.ua.packaging import find_packaging_pairs
 from collector.countries.ua.parsing import CardAnomaly, build_canonical_card, parse_cards
 from collector.countries.ua.prices import fetch_prices
 from collector.countries.ua.series import collect_series, find_official_series, load_series_json
@@ -422,6 +423,17 @@ class ParserUkraine:
                     f"this fetch: {missing}"
                 )
             cards = [c for c in cards if c["source_id"] in wanted]
+
+        # Re-derived from this run's own cards every time parse() runs --
+        # a series re-collected later (NBU adding a packaged sibling to a
+        # theme it had only released loose before, or vice versa) picks
+        # up the pair on its own, no separate pass needed. See
+        # packaging.py for what counts as a genuine pair.
+        packaging_pairs = find_packaging_pairs(cards)
+        for card in cards:
+            bare_id = packaging_pairs.get(card["source_id"])
+            if bare_id is not None:
+                card["packaging_of"] = bare_id
 
         meta_path = self.staging.raw_dir / META_FILENAME
         series_dict = load_series_json()
