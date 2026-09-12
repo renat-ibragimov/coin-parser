@@ -227,6 +227,16 @@ def normalize_title(s: str) -> tuple[str, str | None]:
 _APOSTROPHE_CHARS = "'`’ʼ"
 _APOSTROPHE_CANON = "’"
 
+# ґ and г are two distinct letters of the Ukrainian alphabet (ґ is the
+# hard /g/, г the softer /h/), not a homoglyph pair -- so this isn't
+# fix_homoglyphs' job. But NBU and ua-coins drift on which one they use
+# for the same word: nbu:1213's title has "конґресу" (ґ), while
+# ua-coins' own title for the same coin has "конгресу" (г) -- a real
+# spelling inconsistency between the two sites' own text, not a typo in
+# either one taken alone. Folded to г for comparison only, the same
+# match-only/no-display split as the apostrophe canonicalization below.
+_GE_FOLD = {"ґ": "г", "Ґ": "Г"}
+
 # Quote marks are noise for comparison: NBU quotes the coin's own name in
 # some titles and not in others, and ua-coins copies whichever form NBU
 # used at the time -- ua-coins row 2659 keeps NBU's straight quotes in
@@ -274,16 +284,16 @@ def normalize_match(s: str) -> str:
     """Normalize a string (series name, coin title) for equality
     comparison only -- NOT for display. Applies fix_homoglyphs, folds
     every apostrophe look-alike inside a word to one canonical character,
-    drops quote marks -- an apostrophe look-alike used as one included --
-    collapses whitespace, and case-folds. Two strings that differ only in
-    which apostrophe character, which script a look-alike letter is in,
-    whether a name is quoted, or letter case compare equal after this --
-    NBU and ua-coins don't agree on capitalization inside a title either
-    (nbu:1190 "XV літні Паралімпійські ігри" vs ua-coins' "XV Літні
-    Паралімпійські ігри", "Спорт" -- same coin, different case on one
-    word, which used to fail the exact-match rule outright and land the
-    card in unmatched.json with the right candidate sitting right there
-    in candidates_seen).
+    folds ґ to г, drops quote marks -- an apostrophe look-alike used as
+    one included -- collapses whitespace, and case-folds. Two strings
+    that differ only in which apostrophe character, which script a
+    look-alike letter is in, ґ vs г, whether a name is quoted, or letter
+    case compare equal after this -- NBU and ua-coins don't agree on
+    capitalization inside a title either (nbu:1190 "XV літні
+    Паралімпійські ігри" vs ua-coins' "XV Літні Паралімпійські ігри",
+    "Спорт" -- same coin, different case on one word, which used to fail
+    the exact-match rule outright and land the card in unmatched.json
+    with the right candidate sitting right there in candidates_seen).
 
     Case-folding runs last, after fix_homoglyphs: that step's lookup
     table is keyed on the Latin/Cyrillic letter as NBU actually cased it
@@ -291,6 +301,8 @@ def normalize_match(s: str) -> str:
     "I" indistinguishable from "i" and pick the wrong replacement.
     """
     text = _fold_apostrophes(fix_homoglyphs(s))
+    for ch, replacement in _GE_FOLD.items():
+        text = text.replace(ch, replacement)
     for ch in _MATCH_DROP_CHARS:
         text = text.replace(ch, "")
     return re.sub(r"\s+", " ", text).strip().casefold()

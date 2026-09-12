@@ -145,6 +145,15 @@ def test_normalize_match_applies_homoglyph_fix():
     assert normalize_match(raw) == normalize_match("Знаки зодіаку")
 
 
+def test_normalize_match_folds_ge_with_upturn():
+    # nbu:1213's own title uses "конґресу" (ґ), ua-coins' title for the
+    # same coin uses "конгресу" (г) -- a real spelling drift between the
+    # two sites, not a homoglyph.
+    nbu = "50 років Світовому конґресу українців"
+    ua_coins = "50 років Світовому конгресу українців"
+    assert normalize_match(nbu) == normalize_match(ua_coins)
+
+
 # ---------------------------------------------------------------------- #
 # packaging tail
 # ---------------------------------------------------------------------- #
