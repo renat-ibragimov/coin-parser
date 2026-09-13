@@ -1,11 +1,22 @@
-"""The NBU statistics API -- one currency's rate history over a date range.
+"""The NBU exchange rate archive -- one currency's rate history over a
+date range, one request regardless of how wide the range is.
 
-A different bank.gov.ua service than the numismatic-catalog one
-countries/ua/nbu_client.py talks to: plain JSON, no HTML, no pagination,
-one request per currency covers however wide a range is asked for. That
-is also why coin_keeper's own "sync one date at a time" approach (see
-docs/04-business-rules.md, "Известная дыра" in that repo) was the wrong
-shape -- the range is free, so ask for the whole thing at once.
+Not bank.gov.ua/NBUStatService/v1/statdirectory/exchange, despite that
+being the one documented at bank.gov.ua/ua/open-data/api-dev and the one
+docs/05-integrations.md (coin_keeper) names: that endpoint only accepts
+a single `date`, and silently ignores `start`/`end`/`valcode` -- every
+combination tried against it returned one row, today's, regardless of
+the range asked for (verified live, 2026-09-13). The endpoint that
+actually serves a range is undocumented but is what bank.gov.ua's own
+exchange-rate archive page calls: NBU_Exchange/exchange_site.
+
+Its `rate` field is also not what it is on the documented endpoint: for
+old records it is "rate per `units` units", not "rate per unit" --
+e.g. 2002-01-01 USD carries rate=529.85, units=100 (the early-hryvnia
+scaling), and `rate_per_unit` is the 5.2985 that actually belongs in
+exchange_rates.rate_uah. `units` is 1 for every modern date, where the
+two fields agree, so this is only visible on the older history a
+backfill actually needs.
 """
 
 from __future__ import annotations
@@ -17,7 +28,7 @@ from decimal import Decimal
 
 import httpx
 
-BASE_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory"
+BASE_URL = "https://bank.gov.ua/NBU_Exchange"
 USER_AGENT = "coin-collector/0.1 (personal project)"
 CURRENCIES = ("USD", "EUR")
 
@@ -30,10 +41,11 @@ class RateRow:
 
 
 def _parse_response(text: str, currency_code: str) -> list[RateRow]:
-    """`rate` is parsed straight out of the JSON text as a Decimal, never
-    via float -- json.loads's default float handling would round-trip
-    through a binary float first, and exchange_rates.rate_uah is
-    numeric(14,6): a rate that came in exact must stay exact."""
+    """`rate_per_unit` is parsed straight out of the JSON text as a
+    Decimal, never via float -- json.loads's default float handling
+    would round-trip through a binary float first, and
+    exchange_rates.rate_uah is numeric(14,6): a rate that came in exact
+    must stay exact."""
     records = json.loads(text, parse_float=Decimal)
     rows = []
     for record in records:
@@ -45,7 +57,7 @@ def _parse_response(text: str, currency_code: str) -> list[RateRow]:
         rows.append(
             RateRow(
                 currency_code=currency_code,
-                rate_uah=Decimal(record["rate"]),
+                rate_uah=Decimal(record["rate_per_unit"]),
                 effective_date=effective_date,
             )
         )
@@ -59,14 +71,10 @@ def fetch_range(
     [start, end] -- non-banking days simply have no row, same as the
     source. Raises httpx.HTTPError on a network or HTTP-status failure;
     the caller decides what a failed currency means for the run."""
-    # Built by hand, not via params=: the documented query has a bare
-    # "json" flag with no "=value" (bank.gov.ua/ua/open-data/api-dev), and
-    # httpx's params= would render it as "json=" -- lenient APIs accept
-    # that, but there is no reason to rely on leniency here.
     query = (
-        f"json&start={start.strftime('%Y%m%d')}&end={end.strftime('%Y%m%d')}"
-        f"&valcode={currency_code}&sort=exchangedate&order=desc"
+        f"start={start.strftime('%Y%m%d')}&end={end.strftime('%Y%m%d')}"
+        f"&valcode={currency_code}&sort=exchangedate&order=asc&json"
     )
-    response = client.get(f"{BASE_URL}/exchange?{query}")
+    response = client.get(f"{BASE_URL}/exchange_site?{query}")
     response.raise_for_status()
     return _parse_response(response.text, currency_code)
