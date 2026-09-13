@@ -50,6 +50,10 @@ services:
     <<: *collector
     command: ["ua", "--step", "update-prices"]
 
+  update-rates:
+    <<: *collector
+    command: ["rates"]
+
   # Any other step, one-shot:
   #   docker compose ... run --rm collector ua --step load-prices
   collector:

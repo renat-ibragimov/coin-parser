@@ -53,6 +53,9 @@ coin-collector/
       ua_coins.py    # страницы монет, цены
       normalize.py   # кавычки, суффиксы металла, гомоглифы
       matcher.py     # НБУ <-> ua-coins: название+год+номинал
+  rates/
+    nbu_rates.py     # курсы НБУ (JSON statdirectory), не привязано к стране
+    update_rates.py  # прод-режим: ежесуточно USD/EUR -> exchange_rates
   staging/           # локальный кэш (в .gitignore)
     ua/<serie-slug>/
       raw/           # сырые ответы
@@ -94,6 +97,17 @@ run --country ua --update-prices    # цены по сохранённым сс�
 
 Все четыре — один и тот же конвейер: собрать -> обогатить -> фото -> записать.
 Update-режимы просто сужают вход (новые карточки / только цены).
+
+Отдельно, вне странового конвейера (курс — не монета, серии и стадии тут ни при
+чём):
+
+```
+python -m collector rates                                   # прод, раз в сутки:
+                                                              # USD/EUR за последние
+                                                              # 14 дней -> exchange_rates
+python -m collector rates --start 2002-02-23 --end <сегодня>  # разовый бэкофилл,
+                                                              # тот же код, шире окно
+```
 
 ### Отчёт о прогоне
 

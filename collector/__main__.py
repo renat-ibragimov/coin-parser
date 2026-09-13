@@ -15,17 +15,24 @@
                                                 # Scope comes from the DB, not from staging.
                                                 # Exits 0 ok / 1 partial / 2 nothing done.
 
+    python -m collector rates                   # nightly cron step: NBU USD/EUR rate for the
+                                                # last DEFAULT_WINDOW_DAYS days -> exchange_rates.
+                                                # Exits 0 ok / 1 partial / 2 nothing done.
+    python -m collector rates --start 2002-02-23 --end 2026-09-13
+                                                # one-time backfill, same code, wider window --
+                                                # run once by hand after deploying this step.
+
 The four steps that write to production (load-series, load-cards,
 load-prices, plus the bucket mirror that has to happen between the last
 two) are not interchangeable and have preconditions. The full procedure
 -- server access, the ssh tunnel postgres needs, what to check after
 each step -- is docs/03_series_playbook.md.
 
-update-prices stands apart from all of them: it is the one step meant to
-run unattended, on the server, from deploy/crontab. It has no
-preconditions beyond a loaded catalog, prints one greppable summary line,
-and says everything else through its exit code -- see the "Суточные цены"
-section of the playbook.
+update-prices and rates stand apart from all of them: they are the steps
+meant to run unattended, on the server, from deploy/crontab. Neither has
+preconditions beyond a reachable database, both print one greppable
+summary line, and both say everything else through their exit code --
+see the "Суточные цены" section of the playbook.
 """
 
 from __future__ import annotations
@@ -33,11 +40,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from collector.core.job_report import JobReporter
 from collector.core.staging import DEFAULT_STAGING_ROOT
 from collector.countries.ua.parser import ParserUkraine
+from collector.rates.update_rates import update_rates
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -117,11 +126,42 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    rates = subparsers.add_parser("rates", help="NBU exchange rates (USD, EUR)")
+    rates.add_argument(
+        "--start",
+        type=date.fromisoformat,
+        default=None,
+        help=(
+            "ISO date, earliest day to fetch (default: end - 14 days, the nightly "
+            "self-healing window). Pass the earliest date NBU has for the one-time backfill."
+        ),
+    )
+    rates.add_argument(
+        "--end",
+        type=date.fromisoformat,
+        default=None,
+        help="ISO date, latest day to fetch (default: today)",
+    )
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+
+    if args.country == "rates":
+        # The other unattended cron step (see update-prices below): same
+        # report-then-run-then-report shape, so a container killed
+        # mid-work still leaves the open row update-prices relies on.
+        reporter = JobReporter.from_env("update-rates")
+        reporter.open()
+        try:
+            summary = update_rates(start=args.start, end=args.end)
+        except BaseException as exc:  # noqa: BLE001 - reported, then re-raised
+            reporter.crashed(f"{type(exc).__name__}: {exc}")
+            raise
+        reporter.finish(summary.report_payload())
+        return summary.exit_code
 
     if args.country != "ua":
         return 0

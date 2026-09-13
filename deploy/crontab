@@ -30,3 +30,13 @@
 # The :10 rather than :00 is kept from the original: ua-coins rate-limits
 # hard, and every scraper in the world fires at the top of the hour.
 10 7 * * * /home/deploy/coin-parser/deploy/run-update-prices.sh >> /home/deploy/logs/update-prices.log 2>&1
+
+# NBU USD/EUR rate, every 5 hours (owner's call, 2026-09-13): the request
+# is one small range call per currency regardless of how often it runs,
+# and NBU publishes the official rate once per banking day and does not
+# revise it intraday, so this buys faster pickup of a same-day
+# publication and cheap resilience against one missed run -- not a
+# fresher number during the day, there is no such thing here. The step's
+# own DEFAULT_WINDOW_DAYS (14) re-covers recent dates every run, so a
+# skipped run is invisible by the next one either way.
+25 */5 * * * /home/deploy/coin-parser/deploy/run-update-rates.sh >> /home/deploy/logs/update-rates.log 2>&1
