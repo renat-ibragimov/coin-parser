@@ -156,14 +156,35 @@ def _split_description(
     reverse_kw = "реверс" if locale == "uk" else "reverse"
 
     general_parts, obverse_parts, reverse_parts = [], [], []
+    lead = r"(?:на\s+)?" if locale == "uk" else r"(?:on\s+the\s+)?"
+    marker = re.compile(
+        rf"\b{lead}(?:{re.escape(obverse_kw)}|{re.escape(reverse_kw)})\w*\b", re.IGNORECASE
+    )
     for p in paragraphs:
-        low = p.lower()
-        if reverse_kw in low:
-            reverse_parts.append(p)
-        elif obverse_kw in low:
-            obverse_parts.append(p)
-        else:
-            general_parts.append(p)
+        # Newer NBU cards sometimes put both sides into one HTML paragraph:
+        # "На аверсі ... На реверсі ...".  Classifying the whole paragraph
+        # by the first/last keyword loses one side, so split it at each side
+        # marker first.  Text before the first marker remains the general
+        # description.
+        starts = [match.start() for match in marker.finditer(p)]
+        boundaries = [0, *starts, len(p)]
+        parts = [
+            p[start:end].strip()
+            for start, end in zip(boundaries, boundaries[1:])
+            if p[start:end].strip()
+        ]
+        for part in parts:
+            low = part.lower()
+            if low.startswith(reverse_kw) or re.match(rf"^\W*на\s+{reverse_kw}", low):
+                reverse_parts.append(part)
+            elif low.startswith(obverse_kw) or re.match(rf"^\W*на\s+{obverse_kw}", low):
+                obverse_parts.append(part)
+            elif reverse_kw in low:
+                reverse_parts.append(part)
+            elif obverse_kw in low:
+                obverse_parts.append(part)
+            else:
+                general_parts.append(part)
 
     general = " ".join(general_parts).strip() or None
     obverse = " ".join(obverse_parts).strip() or None

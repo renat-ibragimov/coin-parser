@@ -93,7 +93,9 @@ OWNED_COLUMNS = [
     "metal_kind",
     "weight_grams",
     "diameter_mm",
+    "edge_type_id",
     "edge",
+    "quality_type_id",
     "quality",
     "descriptions",
     "artists",
@@ -796,6 +798,22 @@ def _resolve_denomination(
     return row[0]
 
 
+def _resolve_reference_type(
+    conn: psycopg.Connection, table: str, code: str | None
+) -> int | None:
+    """Resolve a parser vocabulary code to coin_keeper's reference row."""
+    if code is None:
+        return None
+    row = conn.execute(
+        f"SELECT id FROM {table} WHERE code = %(code)s", {"code": code}
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(
+            f"{table}: parser code {code!r} is absent from coin_keeper reference data"
+        )
+    return row[0]
+
+
 def _upsert_links(conn: psycopg.Connection, item_id: int, links: dict[str, str]) -> list[str]:
     """Write the source links that are not already exactly right.
 
@@ -1001,6 +1019,17 @@ def _run_transaction(
             denomination_id=denomination_id,
             original_lang=original_lang,
         )
+        # Parser values are stable vocabulary codes.  Store them through the
+        # catalogue dictionaries so the API can return localised names; the
+        # legacy free-text columns are only a fallback for unknown values.
+        intended["edge_type_id"] = _resolve_reference_type(
+            conn, "edge_types", intended.pop("edge")
+        )
+        intended["edge"] = None
+        intended["quality_type_id"] = _resolve_reference_type(
+            conn, "quality_types", intended.pop("quality")
+        )
+        intended["quality"] = None
 
         current = _select_item(conn, source_id)
         if current is None:

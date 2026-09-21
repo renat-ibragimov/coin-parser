@@ -1,4 +1,4 @@
-from collector.countries.ua.parsing import _pair_names, _split_names
+from collector.countries.ua.parsing import _pair_names, _split_description, _split_names
 
 
 def test_split_names_multiple_comma_separated():
@@ -37,6 +37,19 @@ def test_pair_names_both_missing():
 
 def test_pair_names_only_en_present():
     assert _pair_names(None, "Roman Chaikovskyi") == [{"uk": None, "en": "Roman Chaikovskyi"}]
+
+
+def test_split_description_separates_both_sides_inside_one_paragraph():
+    general, obverse, reverse = _split_description(
+        [
+            "Пам'ятна монета присвячена пісні.",
+            "На аверсі монети зображено портрет. На реверсі монети зображено річку.",
+        ],
+        "uk",
+    )
+    assert general == "Пам'ятна монета присвячена пісні."
+    assert obverse == "На аверсі монети зображено портрет."
+    assert reverse == "На реверсі монети зображено річку."
 
 
 # ---------------------------------------------------------------------- #
