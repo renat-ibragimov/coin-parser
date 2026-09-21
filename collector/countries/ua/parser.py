@@ -489,7 +489,13 @@ class ParserUkraine:
     def load_series(self, dsn: str | None = None):
         return load_series(dsn=dsn)
 
-    def load_cards(self, dsn: str | None = None):
+    def load_cards(
+        self,
+        dsn: str | None = None,
+        *,
+        insert_status: str = "active",
+        only_source_ids: set[str] | None = None,
+    ):
         """One series' coins into catalog_items, with their photos and
         source links. Requires the series to be in db_map.json (run
         load-series first) and its media/out to be mirrored into the
@@ -499,7 +505,11 @@ class ParserUkraine:
                 "load_cards() requires a series name (pass series=... to ParserUkraine)"
             )
         return load_cards(
-            series_slug=self.staging.slug, dsn=dsn, staging_root=self.staging_root
+            series_slug=self.staging.slug,
+            dsn=dsn,
+            staging_root=self.staging_root,
+            insert_status=insert_status,
+            only_source_ids=only_source_ids,
         )
 
     def load_prices(self, dsn: str | None = None, drop_ucoin: bool = False):

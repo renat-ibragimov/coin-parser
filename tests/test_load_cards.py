@@ -87,7 +87,6 @@ def test_build_item_values_maps_the_whole_card():
         "quality": "uncirculated",
         "descriptions": {"uk": {"general": "…"}, "en": {"general": "…"}},
         "artists": {"designers": [{"uk": "Іваненко", "en": "Ivanenko"}], "sculptors": []},
-        "status": "active",
         "source_key": "nbu:161",
     }
 

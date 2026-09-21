@@ -33,7 +33,7 @@ COPY collector/ /src/collector/
 # time. It is deleted right after, and the working directory below is not
 # the source -- an accidental fallback to importing the checkout is then
 # impossible rather than merely unlikely.
-RUN pip install /src \
+RUN pip install '/src[photos]' \
  && rm -rf /src \
  && useradd --create-home --uid ${UID} collector \
  && mkdir -p /staging \

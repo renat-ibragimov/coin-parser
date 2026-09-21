@@ -40,3 +40,8 @@
 # own DEFAULT_WINDOW_DAYS (14) re-covers recent dates every run, so a
 # skipped run is invisible by the next one either way.
 25 */5 * * * /home/deploy/coin-parser/deploy/run-update-rates.sh >> /home/deploy/logs/update-rates.log 2>&1
+
+# Recent NBU releases -> hidden drafts for administrator review. One shallow
+# 25-card page on an ordinary day; detailed work runs only when a
+# previously unseen nbu:<id> appears.
+40 8 * * * /home/deploy/coin-parser/deploy/run-update-catalog.sh >> /home/deploy/logs/update-catalog.log 2>&1

@@ -78,6 +78,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "load-cards",
             "load-prices",
             "update-prices",
+            "update-catalog",
         ],
         default="all",
         help=(
@@ -191,6 +192,19 @@ def main(argv: list[str] | None = None) -> int:
         reporter.open()
         try:
             summary = ParserUkraine(staging_root=staging_root).update_prices()
+        except BaseException as exc:  # noqa: BLE001 - reported, then re-raised
+            reporter.crashed(f"{type(exc).__name__}: {exc}")
+            raise
+        reporter.finish(summary.report_payload())
+        return summary.exit_code
+
+    if args.step == "update-catalog":
+        from collector.countries.ua.catalog_sync import update_catalog
+
+        reporter = JobReporter.from_env("nbu-catalog-sync")
+        reporter.open()
+        try:
+            summary = update_catalog(staging_root=staging_root)
         except BaseException as exc:  # noqa: BLE001 - reported, then re-raised
             reporter.crashed(f"{type(exc).__name__}: {exc}")
             raise

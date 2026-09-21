@@ -97,6 +97,9 @@ OWNED_COLUMNS = [
     "quality",
     "descriptions",
     "artists",
+    # Selected for schema validation and admin-created drafts, but never part
+    # of an update diff: a rerun must not publish or otherwise change a status
+    # chosen by the review workflow.
     "status",
     "source_key",
     # Set by a second pass (_link_packaging_pairs), never by
@@ -455,11 +458,6 @@ def build_item_values(
         "metal_kind": metal_kind_of(card.get("material")),
         "edge": card.get("edge"),
         "quality": card.get("quality"),
-        # An imported record is published straight away; keeping drafts
-        # out of the catalog is an admin-stage job and nothing reads the
-        # column yet (coin_keeper migration 0006). A curator who does
-        # change it protects it through edited_fields, like any field.
-        "status": "active",
         "source_key": card["source_id"],
     }
 
@@ -976,6 +974,8 @@ def _run_transaction(
     plans: list[CardPlan],
     cards_data: dict,
     summary: LoadCardsSummary,
+    *,
+    insert_status: str = "active",
 ) -> None:
     _guard_schema(conn)
 
@@ -1012,7 +1012,7 @@ def _run_transaction(
             adopting = False
 
         if current is None:
-            item_id = _execute_insert(conn, intended)
+            item_id = _execute_insert(conn, {**intended, "status": insert_status})
             report.action = "insert"
             report.db_id = item_id
             report.changes = {col: (None, value) for col, value in intended.items()}
@@ -1091,12 +1091,17 @@ def load_cards(
     series_slug: str,
     dsn: str | None = None,
     staging_root: Path = DEFAULT_STAGING_ROOT,
+    *,
+    insert_status: str = "active",
+    only_source_ids: set[str] | None = None,
 ) -> LoadCardsSummary:
     summary = LoadCardsSummary(series=series_slug)
     series_dir = staging_root / "ua" / series_slug
 
     try:
         plans, cards_data = collect(series_dir, summary)
+        if only_source_ids is not None:
+            plans = [plan for plan in plans if plan.card["source_id"] in only_source_ids]
     except Exception as exc:
         summary.error = f"{type(exc).__name__}: {exc}"
         summary.print_report()
@@ -1114,7 +1119,9 @@ def load_cards(
     try:
         with psycopg.connect(dsn) as conn:
             with conn.transaction():
-                _run_transaction(conn, plans, cards_data, summary)
+                _run_transaction(
+                    conn, plans, cards_data, summary, insert_status=insert_status
+                )
             # conn.transaction() exited without raising -> committed.
     except Exception as exc:
         summary.error = f"{type(exc).__name__}: {exc}"
