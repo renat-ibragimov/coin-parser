@@ -1,3 +1,5 @@
+import pytest
+
 from collector.countries.ua.parsing import _pair_names, _split_description, _split_names
 
 
@@ -39,17 +41,46 @@ def test_pair_names_only_en_present():
     assert _pair_names(None, "Roman Chaikovskyi") == [{"uk": None, "en": "Roman Chaikovskyi"}]
 
 
-def test_split_description_separates_both_sides_inside_one_paragraph():
+def test_split_description_uses_html_positions_not_incidental_side_words():
     general, obverse, reverse = _split_description(
         [
-            "Пам'ятна монета присвячена пісні.",
-            "На аверсі монети зображено портрет. На реверсі монети зображено річку.",
+            "Пам’ятна монета присвячена пісні.",
+            "На аверсі монети зображено річку, що поєднує аверс монети з її реверсом.",
+            "На реверсі монети зображено нотний стан.",
         ],
         "uk",
     )
-    assert general == "Пам'ятна монета присвячена пісні."
-    assert obverse == "На аверсі монети зображено портрет."
-    assert reverse == "На реверсі монети зображено річку."
+    assert general == "Пам’ятна монета присвячена пісні."
+    assert obverse == "На аверсі монети зображено річку, що поєднує аверс монети з її реверсом."
+    assert reverse == "На реверсі монети зображено нотний стан."
+
+
+def test_split_description_does_not_require_standard_opening_words():
+    general, obverse, reverse = _split_description(
+        [
+            "Історична довідка.",
+            "У центрі аверсу розміщено герб.",
+            "На зворотному боці зображено будівлю.",
+        ],
+        "uk",
+    )
+    assert general == "Історична довідка."
+    assert obverse == "У центрі аверсу розміщено герб."
+    assert reverse == "На зворотному боці зображено будівлю."
+
+
+def test_split_description_preserves_empty_positional_slots():
+    assert _split_description(["Загальне.", "", "Реверс."], "uk") == (
+        "Загальне.",
+        None,
+        "Реверс.",
+    )
+    assert _split_description([], "uk") == (None, None, None)
+
+
+def test_split_description_rejects_changed_nbu_markup():
+    with pytest.raises(ValueError, match="expected 3 NBU description blocks, got 2"):
+        _split_description(["Загальне.", "Аверс."], "uk")
 
 
 # ---------------------------------------------------------------------- #

@@ -22,6 +22,8 @@ _CARD_HTML = """
       </div>
       <div class="details hidden"><div class="description">
         <div class="description__text">Опис.</div>
+        <div class="description__text">На аверсі тест.</div>
+        <div class="description__text">На реверсі тест.</div>
       </div><div class="row">
         <div class="col-md-6 close-lines">
           <div><span class="mark">Художник:</span><span class="mark-text"> Хтось</span></div>

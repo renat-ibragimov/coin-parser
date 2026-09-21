@@ -147,49 +147,20 @@ def _big_image_url(img_node) -> str | None:
 def _split_description(
     paragraphs: list[str], locale: str
 ) -> tuple[str | None, str | None, str | None]:
-    """NBU descriptions come as N free paragraphs: a general historical
-    intro, then one obverse-specific and one reverse-specific paragraph.
-    Classify by keyword; anything unclassified is treated as the general
-    paragraph (there is normally exactly one).
+    """Read NBU's three positional description slots.
+
+    The saved UK/EN corpus consistently renders general, obverse/front and
+    reverse/back as three sibling ``description__text`` elements, including
+    empty placeholders.  Their prose is not a schema: side names can occur
+    incidentally inside another side's text, so keywords must not route or
+    split these fields.
     """
-    obverse_kw = "аверс" if locale == "uk" else "obverse"
-    reverse_kw = "реверс" if locale == "uk" else "reverse"
-
-    general_parts, obverse_parts, reverse_parts = [], [], []
-    lead = r"(?:на\s+)?" if locale == "uk" else r"(?:on\s+the\s+)?"
-    marker = re.compile(
-        rf"\b{lead}(?:{re.escape(obverse_kw)}|{re.escape(reverse_kw)})\w*\b", re.IGNORECASE
-    )
-    for p in paragraphs:
-        # Newer NBU cards sometimes put both sides into one HTML paragraph:
-        # "На аверсі ... На реверсі ...".  Classifying the whole paragraph
-        # by the first/last keyword loses one side, so split it at each side
-        # marker first.  Text before the first marker remains the general
-        # description.
-        starts = [match.start() for match in marker.finditer(p)]
-        boundaries = [0, *starts, len(p)]
-        parts = [
-            p[start:end].strip()
-            for start, end in zip(boundaries, boundaries[1:])
-            if p[start:end].strip()
-        ]
-        for part in parts:
-            low = part.lower()
-            if low.startswith(reverse_kw) or re.match(rf"^\W*на\s+{reverse_kw}", low):
-                reverse_parts.append(part)
-            elif low.startswith(obverse_kw) or re.match(rf"^\W*на\s+{obverse_kw}", low):
-                obverse_parts.append(part)
-            elif reverse_kw in low:
-                reverse_parts.append(part)
-            elif obverse_kw in low:
-                obverse_parts.append(part)
-            else:
-                general_parts.append(part)
-
-    general = " ".join(general_parts).strip() or None
-    obverse = " ".join(obverse_parts).strip() or None
-    reverse = " ".join(reverse_parts).strip() or None
-    return general, obverse, reverse
+    del locale  # Position is the same in both NBU locales.
+    if not paragraphs:
+        return None, None, None
+    if len(paragraphs) != 3:
+        raise ValueError(f"expected 3 NBU description blocks, got {len(paragraphs)}")
+    return tuple(paragraph.strip() or None for paragraph in paragraphs)
 
 
 # ---------------------------------------------------------------------- #
