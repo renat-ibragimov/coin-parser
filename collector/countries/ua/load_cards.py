@@ -89,6 +89,7 @@ OWNED_COLUMNS = [
     "issue_date",
     "mintage_announced",
     "mintage_actual",
+    "composition_id",
     "material",
     "metal_kind",
     "weight_grams",
@@ -814,6 +815,18 @@ def _resolve_reference_type(
     return row[0]
 
 
+def _resolve_optional_reference_type(
+    conn: psycopg.Connection, table: str, code: str | None
+) -> int | None:
+    """Resolve a code when coin_keeper has it, otherwise keep issuer text."""
+    if code is None:
+        return None
+    row = conn.execute(
+        f"SELECT id FROM {table} WHERE code = %(code)s", {"code": code}
+    ).fetchone()
+    return row[0] if row else None
+
+
 def _upsert_links(conn: psycopg.Connection, item_id: int, links: dict[str, str]) -> list[str]:
     """Write the source links that are not already exactly right.
 
@@ -1019,9 +1032,17 @@ def _run_transaction(
             denomination_id=denomination_id,
             original_lang=original_lang,
         )
-        # Parser values are stable vocabulary codes.  Store them through the
-        # catalogue dictionaries so the API can return localised names; the
-        # legacy free-text columns are only a fallback for unknown values.
+        # Parser values are stable vocabulary codes. Store known ones through
+        # the catalogue dictionaries so the API can return localised names.
+        # Materials which coin_keeper cannot represent yet retain NBU's own
+        # Ukrainian wording, never the parser's technical code.
+        material_code = intended.pop("material")
+        intended["composition_id"] = _resolve_optional_reference_type(
+            conn, "materials", material_code
+        )
+        intended["material"] = (
+            None if intended["composition_id"] is not None else card.get("material_raw")
+        )
         intended["edge_type_id"] = _resolve_reference_type(
             conn, "edge_types", intended.pop("edge")
         )
