@@ -44,4 +44,10 @@
 # Recent NBU releases -> hidden drafts for administrator review. One shallow
 # 25-card page on an ordinary day; detailed work runs only when a
 # previously unseen nbu:<id> appears.
-40 8 * * * /home/deploy/coin-parser/deploy/run-update-catalog.sh >> /home/deploy/logs/update-catalog.log 2>&1
+#
+# Afternoon on purpose (owner's call, 2026-09-23): NBU publishes new
+# releases in the morning, so an 08:40 UTC run risked reading the catalog
+# before the day's entries landed. 10:40 UTC is 13:40 Kyiv (UTC+3, EEST);
+# it slips to 12:40 Kyiv when the clocks go back at the end of October --
+# still afternoon either way, so no need to move it then.
+40 10 * * * /home/deploy/coin-parser/deploy/run-update-catalog.sh >> /home/deploy/logs/update-catalog.log 2>&1
