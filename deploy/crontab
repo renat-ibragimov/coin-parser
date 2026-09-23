@@ -51,3 +51,11 @@
 # it slips to 12:40 Kyiv when the clocks go back at the end of October --
 # still afternoon either way, so no need to move it then.
 40 10 * * * /home/deploy/coin-parser/deploy/run-update-catalog.sh >> /home/deploy/logs/update-catalog.log 2>&1
+
+# Watchdog: alarms in Telegram when update-prices, update-rates or
+# nbu-catalog-sync has gone quiet past its expected window
+# (coin_keeper repo, docs/13-admin.md, 2.7). The script itself lives in
+# coin_keeper's api container, not here -- this line only triggers it.
+# No ARQ -- a periodic check, not a queued task; silent when everything
+# is fresh, so this firing every 6 hours is not spam.
+0 */6 * * * cd ~/coinkeeper && docker compose exec -T api python scripts/watchdog.py >> /home/deploy/logs/watchdog.log 2>&1
