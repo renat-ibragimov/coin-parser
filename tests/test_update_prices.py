@@ -476,7 +476,7 @@ def test_fetch_scope_filters_by_series_and_by_the_shared_catalogue():
 
 
 # --------------------------------------------------------------------- #
-# the report coin_keeper stores (docs/13-admin.md there, part 1)
+# the report coin_keeper stores (docs/admin.md there, "Job runs")
 # --------------------------------------------------------------------- #
 
 

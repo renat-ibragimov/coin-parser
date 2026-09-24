@@ -1,7 +1,7 @@
 """Telling coin_keeper what a scheduled run did.
 
 The report goes to coin_keeper's API rather than straight into its database
-(docs/13-admin.md in that repository, 2.3): the API is what records the run
+(docs/admin.md in that repository, "Job runs"): the API is what records the run
 AND sends the telegram message, so a run that finishes at 03:23 is in the
 chat at 03:23 without anything having to poll for it.
 

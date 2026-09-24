@@ -1,5 +1,5 @@
 """Keeps coin_keeper's exchange_rates table current -- the write side of
-docs/04-business-rules.md rule 6 in that repository (the read side,
+docs/business-rules.md, BR-6, in that repository (the read side,
 purchase_rate_uah and the historical-rate lookups, is already there and
 untouched by this module).
 

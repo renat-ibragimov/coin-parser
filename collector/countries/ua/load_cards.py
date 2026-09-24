@@ -303,7 +303,7 @@ def _candidate_urls(src_dir: Path) -> dict[str, str]:
     """{downloaded file name: where it came from} from media/src/<id>/meta.json.
 
     Only used to fill media_files.external_url, which records the first
-    publisher of the picture -- nothing ever loads it (docs/06-media-storage.md
+    publisher of the picture -- nothing ever loads it (docs/media.md
     in coin_keeper), so a missing meta.json costs a reference, not a row.
     """
     meta_path = src_dir / "meta.json"

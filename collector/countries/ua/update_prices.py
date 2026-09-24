@@ -517,7 +517,7 @@ class UpdatePricesSummary:
 
         The counters go over as they are; the prose is assembled only when
         something went wrong, because a good night is one line by decision
-        (docs/13-admin.md in coin_keeper, 2.4).
+        (docs/admin.md in coin_keeper, "Reading the counters").
         """
         return {
             "status": self.status_word(),

@@ -54,7 +54,7 @@
 
 # Watchdog: alarms in Telegram when update-prices, update-rates or
 # nbu-catalog-sync has gone quiet past its expected window
-# (coin_keeper repo, docs/13-admin.md, 2.7). The script itself lives in
+# (coin_keeper repo, docs/admin.md, "Watchdog"). The script itself lives in
 # coin_keeper's api container, not here -- this line only triggers it.
 # No ARQ -- a periodic check, not a queued task; silent when everything
 # is fresh, so this firing every 6 hours is not spam.

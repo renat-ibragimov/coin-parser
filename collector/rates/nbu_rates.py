@@ -3,7 +3,7 @@ date range, one request regardless of how wide the range is.
 
 Not bank.gov.ua/NBUStatService/v1/statdirectory/exchange, despite that
 being the one documented at bank.gov.ua/ua/open-data/api-dev and the one
-docs/05-integrations.md (coin_keeper) names: that endpoint only accepts
+docs/integrations.md (coin_keeper) names: that endpoint only accepts
 a single `date`, and silently ignores `start`/`end`/`valcode` -- every
 combination tried against it returned one row, today's, regardless of
 the range asked for (verified live, 2026-09-13). The endpoint that

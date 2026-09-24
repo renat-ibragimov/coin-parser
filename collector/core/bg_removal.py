@@ -3,7 +3,7 @@
 Originally vendored from coin_keeper's backend/app/services/media_background.py
 (https://github.com/renat-ibragimov/coin_keeper); the incident note on
 ALREADY_TRANSPARENT_FRACTION_MIN is load-bearing documentation, kept as-is.
-References to docs/06-media-storage.md and other coin_keeper-only paths point
+References to docs/media.md and other coin_keeper-only paths point
 at that repo, not this one. The shape test and the outline repair have since
 diverged from that source and no longer track it.
 
@@ -13,7 +13,7 @@ blister pack, a colored backdrop or a coin that touches the frame is left
 alone. Note "compact", not "round": the NBU catalog holds an egg-shaped
 pysanka and a heart struck as two half-heart coins, and the shape test here
 is an area ratio (see EXTENT_MIN/EXTENT_MAX) that accepts all three.
-See docs/06-media-storage.md, "Удаление фона", for the rule and the
+See docs/media.md, "Background removal", for the rule and the
 runbook. Pillow plus stdlib only, no opencv/rembg/numpy.
 
 `classify` decides; `cut_background` executes the decision, then trims the
@@ -152,8 +152,8 @@ ALREADY_TRANSPARENT_ALPHA_MAX = 250
 # Incident (2026-09): the dark-background branch read that matte's RGB as a
 # black backdrop, flood-filled it, and cut a fresh alpha from its own mask --
 # discarding the real transparency and exposing whatever the matte used to
-# hide (gradients, shadows, crop leftovers). See docs/06-media-storage.md,
-# "Удаление фона", and the `--revert-transparent-originals` runbook there.
+# hide (gradients, shadows, crop leftovers). See docs/media.md,
+# "Background removal", and the `--revert-transparent-originals` runbook there.
 ALREADY_TRANSPARENT_FRACTION_MIN = 0.005
 
 # Edge softening on the final mask so the cut does not look scissored.
